@@ -1,0 +1,659 @@
+import { useMemo, useState } from 'react'
+import { formatNumber } from '../utils/parsers.js'
+import { CALIDAD_COLORS } from '../utils/normalizers.js'
+import { COPY } from '../config/copy.js'
+import { labelSegmento } from '../config/segments.js'
+import { KPICard, EmptyState, CalidadBar } from '../components/ui/index.jsx'
+
+const MODOS = [
+  { id: 'individual', label: 'Individual' },
+  { id: 'comparar',   label: 'Comparar' },
+]
+
+function ColaboradorSelector({ search, onSearch, selectedUser, onSelect, usuarios, label, placeholder }) {
+  // usuarios: array de { id, nombre } ordenado por nombre
+  const [open, setOpen] = useState(false)
+
+  const filtrados = useMemo(() => {
+    if (!search.trim()) return usuarios
+    const q = search.toLowerCase()
+    return usuarios.filter(u =>
+      u.nombre.toLowerCase().includes(q) || u.id.toLowerCase().includes(q)
+    )
+  }, [usuarios, search])
+
+  const seleccionado = usuarios.find(u => u.id === selectedUser)
+
+  function handleSelect(u) {
+    onSelect(u.id)
+    onSearch('')
+    setOpen(false)
+  }
+
+  function handleClear(e) {
+    e.stopPropagation()
+    onSelect('')
+    onSearch('')
+    setOpen(false)
+  }
+
+  // Highlight matching text
+  function highlight(text, q) {
+    if (!q.trim()) return text
+    const idx = text.toLowerCase().indexOf(q.toLowerCase())
+    if (idx === -1) return text
+    return <>{text.slice(0, idx)}<mark style={{ background:'var(--accent)', color:'#fff', borderRadius:2, padding:'0 2px' }}>{text.slice(idx, idx + q.length)}</mark>{text.slice(idx + q.length)}</>
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'0.35rem', flex:'1 1 220px', minWidth:200, position:'relative' }}>
+      {label && <div style={{ fontSize:'0.72rem', color:'var(--text3)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em' }}>{label}</div>}
+
+      {/* Input de búsqueda */}
+      <div style={{ position:'relative' }}>
+        <input
+          type="text"
+          value={seleccionado && !open ? '' : search}
+          placeholder={seleccionado ? `${seleccionado.nombre}` : (placeholder || 'Buscar por nombre o ID...')}
+          onFocus={() => setOpen(true)}
+          onChange={e => { onSearch(e.target.value); setOpen(true) }}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            background: 'var(--bg3)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)', padding: '0.45rem 2rem 0.45rem 0.75rem',
+            fontSize: '0.82rem', color: seleccionado && !open ? 'var(--text)' : 'var(--text)',
+            outline: 'none', cursor: 'text',
+          }}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+        />
+        {/* Ícono lupa / X */}
+        <span style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', fontSize:'0.75rem', color:'var(--text3)', cursor: seleccionado ? 'pointer' : 'default' }}
+          onClick={seleccionado ? handleClear : undefined}>
+          {seleccionado ? '✕' : '🔍'}
+        </span>
+      </div>
+
+      {/* Chip del seleccionado (cuando hay uno y no está en modo búsqueda) */}
+      {seleccionado && !open && (
+        <div style={{ display:'flex', alignItems:'center', gap:6, background:'var(--bg3)', border:'1px solid var(--accent)', borderRadius:'var(--radius-sm)', padding:'0.3rem 0.6rem' }}>
+          <div style={{ width:26, height:26, borderRadius:'50%', background:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.7rem', fontWeight:700, color:'#fff', flexShrink:0 }}>
+            {seleccionado.nombre[0]?.toUpperCase() || '?'}
+          </div>
+          <div style={{ minWidth:0 }}>
+            <div style={{ fontSize:'0.8rem', fontWeight:600, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{seleccionado.nombre}</div>
+            <div style={{ fontSize:'0.68rem', color:'var(--text3)' }}>{seleccionado.id}</div>
+          </div>
+          <button onClick={handleClear} style={{ marginLeft:'auto', background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:'0.75rem', padding:'0 2px' }}>✕</button>
+        </div>
+      )}
+
+      {/* Dropdown de resultados */}
+      {open && (
+        <div style={{
+          position:'absolute', top:'100%', left:0, right:0, zIndex:100,
+          background:'var(--bg2)', border:'1px solid var(--border)',
+          borderRadius:'var(--radius-sm)', boxShadow:'0 4px 16px rgba(0,0,0,0.4)',
+          maxHeight:260, overflowY:'auto', marginTop:2,
+        }}>
+          {filtrados.length === 0 ? (
+            <div style={{ padding:'0.6rem 0.75rem', fontSize:'0.78rem', color:'var(--text3)' }}>
+              Sin resultados para "{search}"
+            </div>
+          ) : (
+            <>
+              {!search.trim() && (
+                <div style={{ padding:'0.35rem 0.75rem', fontSize:'0.68rem', color:'var(--text3)', borderBottom:'1px solid var(--border)' }}>
+                  {usuarios.length} colaboradores — escribí para filtrar
+                </div>
+              )}
+              {filtrados.map(u => (
+                <div key={u.id} onMouseDown={() => handleSelect(u)}
+                  style={{
+                    display:'flex', alignItems:'center', gap:'0.5rem',
+                    padding:'0.45rem 0.75rem', cursor:'pointer',
+                    background: u.id === selectedUser ? 'var(--bg3)' : 'transparent',
+                    borderBottom:'1px solid var(--border)',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
+                  onMouseLeave={e => e.currentTarget.style.background = u.id === selectedUser ? 'var(--bg3)' : 'transparent'}
+                >
+                  <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.72rem', fontWeight:700, color:'#fff', flexShrink:0 }}>
+                    {u.nombre[0]?.toUpperCase() || '?'}
+                  </div>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:'0.8rem', fontWeight:600, color:'var(--text)' }}>{highlight(u.nombre, search)}</div>
+                    <div style={{ fontSize:'0.68rem', color:'var(--text3)' }}>{highlight(u.id, search)}</div>
+                  </div>
+                  {u.id === selectedUser && <span style={{ marginLeft:'auto', color:'var(--accent)', fontSize:'0.75rem' }}>✓</span>}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function usePerfilColaborador(usuario, model, equipo, todos) {
+  return useMemo(() => {
+    if (!usuario) return null
+    const perfilEq = equipo?.find(e => e.idMeli === usuario) || null
+    const finUser  = model.prodModel?.ranking?.find(r => r.usuario === usuario) || null
+    const audUser  = model.calidadModel?.porUsuario?.find(r => r.usuario === usuario) || null
+    const holdUser = model.friccionModel?.kpisHold
+      ? { total: model.friccionModel.kpisHold.byUsuario?.[usuario] || 0 } : null
+    return { usuario, perfilEq, finUser, audUser, holdUser }
+  }, [usuario, model, equipo])
+}
+
+// Promedios de comparación para un colaborador (vs equipo, rol, segmento)
+function useComparaciones(perfilEq, usuario, model, equipo) {
+  return useMemo(() => {
+    if (!perfilEq || !model.prodModel?.ranking) return null
+    const rank = model.prodModel.ranking
+    const calPorUsuario = model.calidadModel?.porUsuario || []
+
+    function grupoPromedio(filterFn) {
+      const peers = rank.filter(r => r.usuario !== usuario && (() => {
+        const eq = equipo?.find(e => e.idMeli === r.usuario)
+        return eq ? filterFn(eq) : false
+      })())
+      if (!peers.length) return null
+      const cPeers = calPorUsuario.filter(c => peers.some(p => p.usuario === c.usuario))
+      return {
+        n: peers.length,
+        avgTareas: Math.round(peers.reduce((s,r)=>s+r.totalTareas,0)/peers.length),
+        avgIds:    Math.round(peers.reduce((s,r)=>s+r.totalIds,0)/peers.length),
+        avgDia:    Math.round(peers.reduce((s,r)=>s+r.promTareasPorDia,0)/peers.length),
+        avgEfSug:  cPeers.length > 0
+          ? Math.round(cPeers.reduce((s,c)=>s+c.efectividadSug,0)/cPeers.length*100) : null,
+      }
+    }
+    return {
+      equipo:   perfilEq.equipo   ? grupoPromedio(e => e.equipo   === perfilEq.equipo)   : null,
+      rol:      perfilEq.rol      ? grupoPromedio(e => e.rol      === perfilEq.rol)      : null,
+      segmento: perfilEq.segmentoAntiguedad
+        ? grupoPromedio(e => e.segmentoAntiguedad === perfilEq.segmentoAntiguedad) : null,
+    }
+  }, [perfilEq, usuario, model, equipo])
+}
+
+function generarInsightsComparacion(perfiles) {
+  const activos = perfiles.filter(p => p !== null)
+  if (activos.length < 2) return []
+  const ins = []
+
+  // Quién produce más tareas
+  const sortedProd = [...activos].filter(p=>p.finUser).sort((a,b)=>b.finUser.totalTareas-a.finUser.totalTareas)
+  if (sortedProd.length >= 2 && sortedProd[0].finUser && sortedProd[sortedProd.length-1].finUser) {
+    const ratio = sortedProd[0].finUser.totalTareas > 0
+      ? sortedProd[sortedProd.length-1].finUser.totalTareas / sortedProd[0].finUser.totalTareas : null
+    if (ratio != null && ratio < 0.7) {
+      ins.push({ tipo:'atencion', texto:`${sortedProd[0].usuario} finalizó ${Math.round((1-ratio)*100)}% más tareas que ${sortedProd[sortedProd.length-1].usuario}. La diferencia puede deberse a tipo de tarea o días activos.` })
+    }
+  }
+
+  // Quién tiene mayor complejidad (IDs/tarea)
+  const sortedComp = [...activos].filter(p=>p.finUser).sort((a,b)=>b.finUser.relIdsPorTarea-a.finUser.relIdsPorTarea)
+  if (sortedComp.length >= 2 && sortedComp[0].finUser?.relIdsPorTarea > sortedComp[sortedComp.length-1].finUser?.relIdsPorTarea) {
+    ins.push({ tipo:'contexto', texto:`${sortedComp[0].usuario} trabaja tareas más complejas (${sortedComp[0].finUser.relIdsPorTarea}x IDs/tarea vs ${sortedComp[sortedComp.length-1].finUser.relIdsPorTarea}x). Comparar volumen sin considerar esto puede ser engañoso.` })
+  }
+
+  // Calidad
+  const sortedCal = [...activos].filter(p=>p.audUser).sort((a,b)=>b.audUser.efectividadSug-a.audUser.efectividadSug)
+  if (sortedCal.length >= 2) {
+    const gap = Math.round((sortedCal[0].audUser.efectividadSug - sortedCal[sortedCal.length-1].audUser.efectividadSug)*100)
+    if (gap >= 10) {
+      ins.push({ tipo:'atencion', texto:`Brecha de calidad de ${gap} pp entre ${sortedCal[0].usuario} (${Math.round(sortedCal[0].audUser.efectividadSug*100)}%) y ${sortedCal[sortedCal.length-1].usuario} (${Math.round(sortedCal[sortedCal.length-1].audUser.efectividadSug*100)}%).` })
+    }
+  }
+
+  // HOLD
+  const sortedHold = [...activos].filter(p=>p.holdUser && p.finUser?.totalTareas > 0)
+    .sort((a,b)=>
+      (b.holdUser.total/b.finUser.totalTareas)-(a.holdUser.total/a.finUser.totalTareas))
+  if (sortedHold.length >= 2) {
+    const pctMax = Math.round(sortedHold[0].holdUser.total/sortedHold[0].finUser.totalTareas*100)
+    const pctMin = Math.round(sortedHold[sortedHold.length-1].holdUser.total/sortedHold[sortedHold.length-1].finUser.totalTareas*100)
+    if (pctMax - pctMin >= 10) {
+      ins.push({ tipo:'atencion', texto:`${sortedHold[0].usuario} tiene ${pctMax}% de sus tareas en HOLD vs ${pctMin}% de ${sortedHold[sortedHold.length-1].usuario}. Puede indicar tipo de tarea o dependencia de terceros.` })
+    }
+  }
+
+  return ins
+}
+
+function ColaboradorCol({ perfil, rank, comparaciones }) {
+  const { usuario, perfilEq, finUser, audUser, holdUser } = perfil
+  if (!usuario) return <div className="indiv-col-empty">—</div>
+
+  const efColor = audUser
+    ? audUser.efectividadSug>=0.9?'var(--green)':audUser.efectividadSug>=0.75?'var(--yellow)':'var(--red)'
+    : 'var(--text3)'
+
+  return (
+    <div className="indiv-col">
+      {/* Perfil */}
+      <div className="indiv-col-header">
+        <div className="indiv-col-avatar">
+          {(perfilEq?.nombre||usuario).replace('ext_','')[0]?.toUpperCase()||'?'}
+        </div>
+        <div>
+          <div style={{ fontWeight:700, fontSize:'0.85rem', color:'var(--text)' }}>{perfilEq?.nombre||usuario}</div>
+          <div style={{ fontSize:'0.68rem', color:'var(--text3)' }}>
+            {[perfilEq?.rol, perfilEq?.equipo].filter(Boolean).join(' · ')||usuario}
+          </div>
+          {perfilEq?.segmentoAntiguedad && (
+            <div style={{ fontSize:'0.65rem', color:'var(--text3)' }}>
+              {labelSegmento(perfilEq.segmentoAntiguedad)}
+              {perfilEq.antiguedadDias != null ? ` (${perfilEq.antiguedadDias}d)` : ''}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Productividad */}
+      <div className="indiv-col-section">Productividad</div>
+      <MetricRow label="Tareas" value={finUser ? formatNumber(finUser.totalTareas) : '—'} highlight={rank==='best'} />
+      <MetricRow label="IDs trabajados" value={finUser ? formatNumber(finUser.totalIds) : '—'} />
+      <MetricRow label="IDs por tarea" value={finUser ? `${finUser.relIdsPorTarea}x` : '—'} />
+      <MetricRow label="Tareas/día" value={finUser ? formatNumber(finUser.promTareasPorDia) : '—'} highlight={rank==='best'} />
+      <MetricRow label="Días activos" value={finUser ? finUser.diasHabiles : '—'} />
+
+      {/* Calidad */}
+      <div className="indiv-col-section">Calidad</div>
+      <MetricRow label="Ef. sugerencias" value={audUser ? `${Math.round(audUser.efectividadSug*100)}%` : '—'}
+        valueColor={audUser ? efColor : 'var(--text3)'} highlight={rank==='bestCal'} />
+      {audUser && (
+        <div style={{ padding:'0 0.75rem 0.5rem' }}>
+          <CalidadBar correcto={audUser.correcto||0} desvio_leve={audUser.desvio_leve||0}
+            desvio_grave={audUser.desvio_grave||0} sin_clasificar={audUser.sin_clasificar||0}
+            total={audUser.totalSugs} />
+        </div>
+      )}
+      <MetricRow label="Ef. casos" value={audUser ? `${Math.round(audUser.efectividadCaso*100)}%` : '—'}
+        note="contextual" />
+
+      {/* Fricción */}
+      <div className="indiv-col-section">Fricción</div>
+      <MetricRow label="Registros HOLD" value={holdUser ? formatNumber(holdUser.total) : '—'}
+        valueColor={holdUser?.total > 0 ? 'var(--red)' : 'var(--text3)'} />
+      {holdUser && finUser?.totalTareas > 0 && (
+        <MetricRow label="% en HOLD" value={`${Math.round(holdUser.total/finUser.totalTareas*100)}%`}
+          valueColor={holdUser.total/finUser.totalTareas>0.1?'var(--red)':holdUser.total/finUser.totalTareas>0.05?'var(--yellow)':'var(--green)'} />
+      )}
+    </div>
+  )
+}
+
+function MetricRow({ label, value, valueColor, highlight, note }) {
+  return (
+    <div style={{
+      display:'flex', justifyContent:'space-between', alignItems:'center',
+      padding:'5px 0.75rem', borderBottom:'1px solid var(--border)',
+      background: highlight ? 'rgba(99,102,241,0.06)' : 'transparent',
+    }}>
+      <span style={{ fontSize:'0.75rem', color:'var(--text3)' }}>
+        {label}{note && <span style={{ marginLeft:4, fontSize:'0.65rem', color:'var(--text3)' }}>({note})</span>}
+      </span>
+      <span style={{ fontSize:'0.82rem', fontWeight:highlight?700:600,
+        color: valueColor || (highlight ? 'var(--accent2)' : 'var(--text)') }}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+export function IndividualModule({ model, equipo, options }) {
+  const [modo, setModo] = useState('individual')
+
+  // Individual
+  const [search1, setSearch1] = useState('')
+  const [user1, setUser1]     = useState('')
+
+  // Comparar (hasta 3)
+  const [search2, setSearch2] = useState('')
+  const [search3, setSearch3] = useState('')
+  const [search4, setSearch4] = useState('')
+  const [userA, setUserA] = useState('')
+  const [userB, setUserB] = useState('')
+  const [userC, setUserC] = useState('')
+
+  // Build enriched user list: { id, nombre } sorted by nombre
+  const todosUsuarios = useMemo(() => {
+    const ids = [...new Set([...(options.usuarios?.map(u => u.value) || [])])]
+    return ids.map(id => {
+      const eq = equipo?.find(e => e.idMeli === id)
+      return { id, nombre: eq?.nombre || id }
+    }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+  }, [options.usuarios, equipo])
+
+  // Perfiles
+  const perfilIndividual = usePerfilColaborador(user1, model, equipo, todosUsuarios)
+  const comparA = usePerfilColaborador(userA, model, equipo, todosUsuarios)
+  const comparB = usePerfilColaborador(userB, model, equipo, todosUsuarios)
+  const comparC = usePerfilColaborador(userC, model, equipo, todosUsuarios)
+
+  const perfilEqInd  = equipo?.find(e => e.idMeli === user1) || null
+  const comparaciones = useComparaciones(perfilEqInd, user1, model, equipo)
+
+  const insights = useMemo(() => generarInsightsComparacion([comparA, comparB, comparC]),
+    [comparA, comparB, comparC])
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'1.25rem' }}>
+
+      {/* Toggle modo */}
+      <div style={{ display:'flex', gap:4, background:'var(--bg3)', borderRadius:'var(--radius-sm)', padding:3, width:'fit-content' }}>
+        {MODOS.map(m => (
+          <button key={m.id}
+            className={`filter-preset-btn${modo===m.id?' active':''}`}
+            style={{ padding:'5px 18px' }}
+            onClick={() => setModo(m.id)}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── MODO INDIVIDUAL ────────────────────────────────── */}
+      {modo === 'individual' && (
+        <>
+          <div className="card" style={{ padding:'1rem 1.25rem' }}>
+            <div style={{ fontSize:'0.82rem', color:'var(--text2)', fontWeight:600, marginBottom:'0.6rem' }}>
+              Seleccioná un colaborador
+            </div>
+            <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap', alignItems:'flex-end' }}>
+              <ColaboradorSelector
+                search={search1} onSearch={setSearch1}
+                selectedUser={user1} onSelect={setUser1}
+                usuarios={todosUsuarios}
+                placeholder="— Elegir colaborador —"
+              />
+              {user1 && (
+                <button className="btn" onClick={() => { setUser1(''); setSearch1('') }}>✕ Limpiar</button>
+              )}
+            </div>
+          </div>
+
+          {!user1 && <EmptyState message="Seleccioná un colaborador para ver su perfil. Usá el buscador para encontrarlo rápido." />}
+
+          {user1 && perfilIndividual && (
+            <>
+              {/* Perfil organizacional */}
+              <div className="card">
+                <div style={{ display:'flex', alignItems:'center', gap:'0.75rem', flexWrap:'wrap' }}>
+                  <div className="indiv-avatar-lg">
+                    {(perfilIndividual.perfilEq?.nombre||user1).replace('ext_','')[0]?.toUpperCase()||'?'}
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:'1rem', fontWeight:700, color:'var(--text)' }}>
+                      {perfilIndividual.perfilEq?.nombre||user1}
+                    </div>
+                    <div style={{ fontSize:'0.72rem', color:'var(--text3)', marginTop:2 }}>
+                      {[perfilIndividual.perfilEq?.rol, perfilIndividual.perfilEq?.equipo,
+                        perfilIndividual.perfilEq?.ubicacion].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  {perfilIndividual.perfilEq && (
+                    <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap' }}>
+                      {[
+                        { label:'Antigüedad', value: perfilIndividual.perfilEq.antiguedadDias != null ? `${perfilIndividual.perfilEq.antiguedadDias}d` : '—' },
+                        { label:'Segmento',   value: perfilIndividual.perfilEq.segmentoAntiguedad ? labelSegmento(perfilIndividual.perfilEq.segmentoAntiguedad) : '—' },
+                      ].map(({ label, value }) => (
+                        <div key={label} >
+                          <div style={{ fontSize:'0.65rem', color:'var(--text3)' }}>{label}</div>
+                          <div style={{ fontSize:'0.82rem', fontWeight:600, color:'var(--text)' }}>{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* KPIs individuales */}
+              {perfilIndividual.finUser ? (
+                <>
+                  <div className="metric-note metric-note-important">ℹ️ Tareas y IDs son métricas distintas. Una tarea puede involucrar varios IDs.</div>
+                  <div className="grid grid-4">
+                    <KPICard label="Tareas" value={formatNumber(perfilIndividual.finUser.totalTareas)}
+                      sub="Registros que pasaron a DONE." icon="📦" />
+                    <KPICard label="IDs trabajados" value={formatNumber(perfilIndividual.finUser.totalIds)}
+                      sub="Productos distintos accionados." icon="🔗" color="#38bdf8" />
+                    <KPICard label="IDs por tarea" value={`${perfilIndividual.finUser.relIdsPorTarea}x`}
+                      sub="Complejidad promedio por tarea." icon="🔄" color="var(--slate)" />
+                    <KPICard label="Tareas por día activo" value={formatNumber(perfilIndividual.finUser.promTareasPorDia)}
+                      sub="En días con actividad real." icon="⚡" color="var(--green)" />
+                  </div>
+                  {perfilIndividual.holdUser && (
+                    <div className="grid grid-4">
+                      <KPICard label="Días activos" value={perfilIndividual.finUser.diasHabiles}
+                        sub="Con al menos una tarea." icon="📅" color="var(--accent2)" />
+                      <KPICard label="Registros HOLD" value={formatNumber(perfilIndividual.holdUser.total)}
+                        sub={`${perfilIndividual.finUser.totalTareas>0?Math.round(perfilIndividual.holdUser.total/perfilIndividual.finUser.totalTareas*100):0}% de sus tareas pasaron por HOLD.`}
+                        icon="⏸️" color="var(--red)" />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="card">
+                  <div className="empty-state" style={{ padding:'1.5rem' }}>
+                    Sin datos de productividad para {user1} en el período. Probá ampliar el rango de fechas.
+                  </div>
+                </div>
+              )}
+
+              {/* Comparación vs contexto */}
+              {comparaciones && perfilIndividual.finUser && (
+                <div className="card">
+                  <div className="card-header" style={{ marginBottom:'0.75rem' }}>
+                    <div className="card-title">Comparación con su contexto</div>
+                    <div className="card-subtitle">Promedio de los pares en cada grupo. El ratio indica su posición relativa.</div>
+                  </div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th >Métrica</th>
+                          <th style={{ color:'var(--accent2)'}}>
+                            {perfilIndividual.perfilEq?.nombre||user1}
+                          </th>
+                          {comparaciones.equipo && (
+                            <th style={{ color:'var(--text3)'}}>
+                              Equipo "{perfilIndividual.perfilEq?.equipo}"
+                              <div style={{fontSize:'0.65rem',fontWeight:400}}>{comparaciones.equipo.n} peers</div>
+                            </th>
+                          )}
+                          {comparaciones.rol && (
+                            <th style={{ color:'var(--text3)'}}>
+                              Rol "{perfilIndividual.perfilEq?.rol}"
+                              <div style={{fontSize:'0.65rem',fontWeight:400}}>{comparaciones.rol.n} peers</div>
+                            </th>
+                          )}
+                          {comparaciones.segmento && (
+                            <th style={{ color:'var(--text3)'}}>
+                              {labelSegmento(perfilIndividual.perfilEq?.segmentoAntiguedad)}
+                              <div style={{fontSize:'0.65rem',fontWeight:400}}>{comparaciones.segmento.n} peers</div>
+                            </th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { label:'Tareas', personal: perfilIndividual.finUser.totalTareas, key:'avgTareas', fmt: formatNumber },
+                          { label:'IDs trabajados', personal: perfilIndividual.finUser.totalIds, key:'avgIds', fmt: formatNumber },
+                          { label:'Tareas por día activo', personal: perfilIndividual.finUser.promTareasPorDia, key:'avgDia', fmt: formatNumber },
+                        ].map(({ label, personal, key, fmt }) => (
+                          <tr key={label}>
+                            <td style={{ color:'var(--text2)'}}>{label}</td>
+                            <td style={{ fontWeight:700}}>{fmt(personal)}</td>
+                            {comparaciones.equipo && <ComparCell personal={personal} prom={comparaciones.equipo[key]} fmt={fmt} />}
+                            {comparaciones.rol     && <ComparCell personal={personal} prom={comparaciones.rol[key]}   fmt={fmt} />}
+                            {comparaciones.segmento&& <ComparCell personal={personal} prom={comparaciones.segmento[key]} fmt={fmt} />}
+                          </tr>
+                        ))}
+                        {perfilIndividual.audUser && (
+                          <tr>
+                            <td style={{ color:'var(--text2)'}}>Sugerencias correctas</td>
+                            <td style={{ fontWeight:700,
+                              color: perfilIndividual.audUser.efectividadSug>=0.9?'var(--green)':perfilIndividual.audUser.efectividadSug>=0.75?'var(--yellow)':'var(--red)'}}>
+                              {Math.round(perfilIndividual.audUser.efectividadSug*100)}%
+                            </td>
+                            {comparaciones.equipo && <ComparCell personal={perfilIndividual.audUser.efectividadSug*100} prom={comparaciones.equipo.avgEfSug} fmt={v=>v!=null?`${Math.round(v)}%`:'—'} />}
+                            {comparaciones.rol     && <ComparCell personal={perfilIndividual.audUser.efectividadSug*100} prom={comparaciones.rol.avgEfSug}     fmt={v=>v!=null?`${Math.round(v)}%`:'—'} />}
+                            {comparaciones.segmento&& <ComparCell personal={perfilIndividual.audUser.efectividadSug*100} prom={comparaciones.segmento.avgEfSug} fmt={v=>v!=null?`${Math.round(v)}%`:'—'} />}
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Calidad */}
+              {perfilIndividual.audUser ? (
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Calidad auditada</div>
+                    <span className="badge badge-accent">Por sugerencia_id (principal)</span>
+                  </div>
+                  <div style={{ display:'flex', gap:'1.5rem', flexWrap:'wrap', alignItems:'center' }}>
+                    <div>
+                      <div style={{ fontSize:'1.8rem', fontWeight:700,
+                        color: perfilIndividual.audUser.efectividadSug>=0.9?'var(--green)':perfilIndividual.audUser.efectividadSug>=0.75?'var(--yellow)':'var(--red)' }}>
+                        {Math.round(perfilIndividual.audUser.efectividadSug*100)}%
+                      </div>
+                      <div style={{ fontSize:'0.72rem', color:'var(--text3)' }}>
+                        {formatNumber(perfilIndividual.audUser.totalSugs)} sugerencias · Target: 90%
+                      </div>
+                    </div>
+                    <div style={{ flex:1, minWidth:180 }}>
+                      <CalidadBar correcto={perfilIndividual.audUser.correcto||0}
+                        desvio_leve={perfilIndividual.audUser.desvio_leve||0}
+                        desvio_grave={perfilIndividual.audUser.desvio_grave||0}
+                        sin_clasificar={perfilIndividual.audUser.sin_clasificar||0}
+                        total={perfilIndividual.audUser.totalSugs} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize:'0.75rem', color:'var(--text3)', marginTop:'0.5rem' }}>
+                    Por caso (contextual): <strong>{Math.round(perfilIndividual.audUser.efectividadCaso*100)}%</strong>
+                    <span style={{ marginLeft:6 }}>({perfilIndividual.audUser.totalCasos} casos)</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="card">
+                  <div className="empty-state" style={{ padding:'1rem' }}>
+                    Sin auditorías para {user1} en el período. Ampliá el rango o verificá si fue auditado.
+                  </div>
+                </div>
+              )}
+
+              {/* Distribución por flujo */}
+              {perfilIndividual.finUser && Object.entries(perfilIndividual.finUser.byFlujo||{}).some(([,v])=>v>0) && (
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Tareas por flujo</div>
+                  </div>
+                  <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap' }}>
+                    {Object.entries(perfilIndividual.finUser.byFlujo).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).map(([flujo,val])=>(
+                      <div key={flujo} style={{ background:'var(--bg3)', border:'1px solid var(--border)',
+                        borderRadius:'var(--radius-sm)', padding:'0.5rem 0.85rem', minWidth:110 }}>
+                        <div style={{ fontSize:'0.7rem', color:'var(--text3)' }}>{flujo}</div>
+                        <div style={{ fontSize:'1.1rem', fontWeight:700, color:'var(--text)' }}>{formatNumber(val)}</div>
+                        <div style={{ fontSize:'0.68rem', color:'var(--text3)' }}>
+                          {perfilIndividual.finUser.totalTareas>0?Math.round(val/perfilIndividual.finUser.totalTareas*100):0}%
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {/* ── MODO COMPARAR ──────────────────────────────────── */}
+      {modo === 'comparar' && (
+        <>
+          <div className="metric-note metric-note-important">
+            Seleccioná hasta 3 colaboradores para comparar su productividad, calidad y fricción en paralelo.
+          </div>
+
+          {/* Selectores de colaboradores */}
+          <div className="card" style={{ padding:'1rem 1.25rem' }}>
+            <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap' }}>
+              <ColaboradorSelector search={search2} onSearch={setSearch2} selectedUser={userA} onSelect={setUserA}
+                usuarios={todosUsuarios.filter(u=>u.id!==userB&&u.id!==userC)} label="Colaborador 1" />
+              <ColaboradorSelector search={search3} onSearch={setSearch3} selectedUser={userB} onSelect={setUserB}
+                usuarios={todosUsuarios.filter(u=>u.id!==userA&&u.id!==userC)} label="Colaborador 2" />
+              <ColaboradorSelector search={search4} onSearch={setSearch4} selectedUser={userC} onSelect={setUserC}
+                usuarios={todosUsuarios.filter(u=>u.id!==userA&&u.id!==userB)} label="Colaborador 3 (opcional)" />
+            </div>
+            {(userA||userB||userC) && (
+              <button className="btn" style={{ marginTop:'0.75rem' }}
+                onClick={() => { setUserA('');setUserB('');setUserC('');setSearch2('');setSearch3('');setSearch4('') }}>
+                ✕ Limpiar comparación
+              </button>
+            )}
+          </div>
+
+          {!userA && !userB && (
+            <EmptyState message="Seleccioná al menos 2 colaboradores para comparar." />
+          )}
+
+          {(userA || userB) && (
+            <>
+              {/* Insights automáticos */}
+              {insights.length > 0 && (
+                <div className="card">
+                  <div className="card-header" style={{ marginBottom:'0.75rem' }}>
+                    <div className="card-title">Hallazgos de la comparación</div>
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:'0.4rem' }}>
+                    {insights.map((ins, i) => (
+                      <div key={i} className={`alert-item ${ins.tipo==='atencion'?'alert-atencion':'alert-contexto'}`}>
+                        <span>{ins.tipo==='atencion'?'🟡':'🔵'}</span>
+                        <span style={{ fontSize:'0.82rem', color:'var(--text2)' }}>{ins.texto}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Columnas de comparación */}
+              <div className="indiv-compare-grid" style={{
+                display:'grid',
+                gridTemplateColumns:`repeat(${[userA,userB,userC].filter(Boolean).length}, 1fr)`,
+                gap:'0.75rem',
+              }}>
+                {[
+                  { perfil: comparA, user: userA },
+                  { perfil: comparB, user: userB },
+                  { perfil: comparC, user: userC },
+                ].filter(x => x.user).map(({ perfil, user }) => (
+                  <ColaboradorCol key={user} perfil={perfil || { usuario: user, perfilEq:null, finUser:null, audUser:null, holdUser:null }} />
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function ComparCell({ personal, prom, fmt }) {
+  if (prom == null) return <td style={{ color:'var(--text3)'}}>—</td>
+  const ratio = prom > 0 ? personal / prom : null
+  const color = ratio == null ? 'var(--text3)'
+    : ratio >= 0.9 ? 'var(--green)' : ratio >= 0.7 ? 'var(--yellow)' : 'var(--red)'
+  return (
+    <td >
+      <div style={{ color:'var(--text2)' }}>{fmt(Math.round(prom))}</div>
+      {ratio != null && (
+        <div style={{ fontSize:'0.68rem', color, fontWeight:600 }}>{Math.round(ratio*100)}%</div>
+      )}
+    </td>
+  )
+}
