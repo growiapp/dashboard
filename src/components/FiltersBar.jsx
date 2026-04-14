@@ -97,7 +97,7 @@ export function FiltersBar({
           <>
             <YearSel year={state.year} years={availableYears} onChange={setYear} />
             <select className="filter-select" value={state.month ?? ''} onChange={e => setMonth(e.target.value === '' ? null : parseInt(e.target.value))}>
-              <option value="">— Mes —</option>
+              <option value="">Todos los meses</option>
               {monthsForYear.map(({ month, label, hasData }) => (
                 <option key={month} value={month} disabled={!hasData}>
                   {label}{!hasData ? ' (sin datos)' : ''}
@@ -111,7 +111,7 @@ export function FiltersBar({
           <>
             <YearSel year={state.year} years={availableYears} onChange={setYear} />
             <select className="filter-select" value={state.week ?? ''} onChange={e => setWeek(e.target.value === '' ? null : parseInt(e.target.value))} style={{ minWidth: 180 }}>
-              <option value="">— Semana —</option>
+              <option value="">Todas las semanas</option>
               {weeksForYear.map(({ week, label, hasData }) => (
                 <option key={week} value={week} disabled={!hasData}>
                   {label}{!hasData ? ' (sin datos)' : ''}

@@ -116,11 +116,9 @@ export function normalizeAuditados(rows) {
 //         Auditor, EstadoFinal_esCorrecto, Motivo_de_Rechazo_esCorrecto
 
 export function normalizeMaoRow(raw) {
-  // Fecha: "29 dic 2025" → parseDate lo maneja vía DD MMM YYYY
-  // El parseDate existente soporta DD/MM/YYYY y DD-MM-YYYY.
-  // Para "29 dic 2025" necesitamos convertirlo primero.
   const fechaRaw = (raw['FECHA_ACCIONAMIENTO'] || '').trim()
-  const fecha = parseFechaEspanol(fechaRaw)
+  const fechaBase = parseFechaEspanol(fechaRaw)
+  const fecha = fechaBase ? new Date(fechaBase.getTime() + 7 * 24 * 60 * 60 * 1000) : null
 
   const estadoFinal   = (raw['EstadoFinal_esCorrecto'] || '').trim()
   const motivoRechazo = (raw['Motivo_de_Rechazo_esCorrecto'] || '').trim()
@@ -133,14 +131,15 @@ export function normalizeMaoRow(raw) {
     sugerenciaId: (raw['ID_CDM'] || '').trim(),     dominio:     (raw['DOMINIO'] || '').trim() || null,
     usuario:     (raw['COLABORADOR'] || '').trim(),
     resolucion:  (raw['RESOLUCION'] || '').trim() || null,
-    suggestionReason: (raw['RESOLUCION'] || '').trim() || null, // equivalente a suggestion_reason en SdC
+    suggestionReason: (raw['RESOLUCION'] || '').trim() || null,
     auditor:     (raw['Auditor'] || '').trim(),
     estadoFinal,
     motivoRechazo,
     calidad: clasificarCalidad(estadoFinal, motivoRechazo),
     casuisticas: (raw['Casuisticas'] || '').trim() || null,
     comentario:  (raw['Comentario'] || raw['COMENTARIO'] || '').trim() || null,
-    tipo: 'mao',   }
+    tipo: 'mao',
+  }
 }
 
 // Parsea fechas en formato "29 dic 2025" (español abreviado)
