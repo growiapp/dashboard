@@ -78,57 +78,46 @@ export function FiltersBar({
         {modo === 'year' && (
           <>
             <YearSel year={state.year} years={availableYears} onChange={setYear} />
-            <div className="filter-preset-group">
+            <select className="filter-select" value={state.subYear} onChange={e => setSubYear(e.target.value)}>
               {[
                 { id:'all', label:'Todo el año' },
-                { id:'q1',  label:'Q1' },
-                { id:'q2',  label:'Q2' },
-                { id:'q3',  label:'Q3' },
-                { id:'q4',  label:'Q4' },
+                { id:'q1',  label:'Q1 — Ene/Mar' },
+                { id:'q2',  label:'Q2 — Abr/Jun' },
+                { id:'q3',  label:'Q3 — Jul/Sep' },
+                { id:'q4',  label:'Q4 — Oct/Dic' },
               ].map(({ id, label }) => {
                 const hasData = availability.yearSet.has(state.year)
-                return (
-                  <button key={id}
-                    className={`filter-preset-btn${state.subYear===id?' active':''}`}
-                    disabled={!hasData}
-                    onClick={() => setSubYear(id)}
-                    style={{ opacity: hasData ? 1 : 0.38, cursor: hasData ? 'pointer' : 'default' }}
-                  >{label}</button>
-                )
+                return <option key={id} value={id} disabled={!hasData}>{label}</option>
               })}
-            </div>
+            </select>
           </>
         )}
 
         {modo === 'month' && (
           <>
             <YearSel year={state.year} years={availableYears} onChange={setYear} />
-            <div className="filter-preset-group" style={{ flexWrap:'wrap', maxWidth:320 }}>
+            <select className="filter-select" value={state.month ?? ''} onChange={e => setMonth(e.target.value === '' ? null : parseInt(e.target.value))}>
+              <option value="">— Mes —</option>
               {monthsForYear.map(({ month, label, hasData }) => (
-                <button key={month}
-                  className={`filter-preset-btn${state.month===month?' active':''}`}
-                  disabled={!hasData}
-                  onClick={() => setMonth(month)}
-                  style={{ opacity: hasData ? 1 : 0.38, cursor: hasData ? 'pointer' : 'default' }}
-                >{label}</button>
+                <option key={month} value={month} disabled={!hasData}>
+                  {label}{!hasData ? ' (sin datos)' : ''}
+                </option>
               ))}
-            </div>
+            </select>
           </>
         )}
 
         {modo === 'week' && (
           <>
             <YearSel year={state.year} years={availableYears} onChange={setYear} />
-            <div style={{ display:'flex', gap:2, flexWrap:'wrap', maxWidth:520 }}>
+            <select className="filter-select" value={state.week ?? ''} onChange={e => setWeek(e.target.value === '' ? null : parseInt(e.target.value))} style={{ minWidth: 180 }}>
+              <option value="">— Semana —</option>
               {weeksForYear.map(({ week, label, hasData }) => (
-                <button key={week}
-                  className={`filter-preset-btn${state.week===week?' active':''}`}
-                  disabled={!hasData}
-                  onClick={() => setWeek(week)}
-                  style={{ opacity: hasData ? 1 : 0.38, cursor: hasData ? 'pointer' : 'default', fontSize:'0.7rem', padding:'3px 7px' }}
-                >{label}</button>
+                <option key={week} value={week} disabled={!hasData}>
+                  {label}{!hasData ? ' (sin datos)' : ''}
+                </option>
               ))}
-            </div>
+            </select>
           </>
         )}
 
