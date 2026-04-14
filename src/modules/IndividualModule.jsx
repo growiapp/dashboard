@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { ComposedChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { formatNumber } from '../utils/parsers.js'
-import { CALIDAD_COLORS } from '../utils/normalizers.js'
 import { COPY } from '../config/copy.js'
 import { labelSegmento } from '../config/segments.js'
 import { KPICard, EmptyState, CalidadBar, CustomTooltip } from '../components/ui/index.jsx'
@@ -22,17 +21,38 @@ function semanalProductividad(historico, usuario) {
 }
 
 function semanalCalidad(auditados, usuario) {
-  const map = new Map()
-  for (const r of (auditados || [])) {
-    if (r.usuario !== usuario || !r.week) continue
-    if (!map.has(r.week)) map.set(r.week, { week: r.week, total: 0, correcto: 0 })
-    const e = map.get(r.week)
+  const base = (auditados || []).filter(r => r.usuario === usuario && r.week)
+  const mapSug = new Map()
+  for (const r of base) {
+    const k = r.week
+    if (!mapSug.has(k)) mapSug.set(k, { week: k, total: 0, correcto: 0 })
+    const e = mapSug.get(k)
     e.total++
     if (r.calidad === 'correcto') e.correcto++
   }
-  return [...map.values()]
-    .map(e => ({ ...e, efectividad: e.total > 0 ? e.correcto / e.total : 0 }))
-    .sort((a, b) => a.week - b.week)
+  // Calidad por caso (idCaso) para la segunda línea contextual
+  const casos = new Map()
+  for (const r of base) {
+    if (!r.idCaso) continue
+    if (!casos.has(r.idCaso)) casos.set(r.idCaso, { week: r.week, sugs: [] })
+    casos.get(r.idCaso).sugs.push(r.calidad)
+  }
+  const mapCaso = new Map()
+  for (const [, c] of casos) {
+    const k = c.week
+    if (!mapCaso.has(k)) mapCaso.set(k, { totalCasos: 0, correctoCasos: 0 })
+    const e = mapCaso.get(k)
+    e.totalCasos++
+    if (c.sugs.every(s => s === 'correcto')) e.correctoCasos++
+  }
+  return [...mapSug.values()].map(e => {
+    const cd = mapCaso.get(e.week) || { totalCasos: 0, correctoCasos: 0 }
+    return {
+      ...e,
+      efectividadSug:  e.total > 0 ? e.correcto / e.total : 0,
+      efectividadCaso: cd.totalCasos > 0 ? cd.correctoCasos / cd.totalCasos : 0,
+    }
+  }).sort((a, b) => a.week - b.week)
 }
 
 const MODOS = [
@@ -341,19 +361,22 @@ function GraficoProdSemanal({ usuario, filteredHistorico }) {
   return (
     <div className="card">
       <div className="card-header">
-        <div className="card-title">Tendencia semanal — Tareas e IDs</div>
-        <div className="card-subtitle">Evolución semana a semana en el período filtrado.</div>
+        <div>
+          <div className="card-title">Tendencia semanal — Tareas e IDs</div>
+          <div className="card-subtitle">Barras = tareas · Línea = IDs trabajados. Si divergen, la complejidad promedio cambió.</div>
+        </div>
       </div>
-      <ResponsiveContainer width="100%" height={200}>
-        <LineChart data={data} margin={{ top:5, right:10, left:0, bottom:5 }}>
+      <ResponsiveContainer width="100%" height={240}>
+        <ComposedChart data={data} margin={{ top:5, right:40, left:0, bottom:5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-          <XAxis dataKey="week" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={v=>`S${v}`} />
-          <YAxis tick={{ fill:'var(--text3)', fontSize:11 }} />
-          <Tooltip content={<CustomTooltip labelFormatter={v=>`Semana ${v}`} />} />
-          <Legend wrapperStyle={{ fontSize:'0.75rem', color:'var(--text3)' }} />
-          <Line type="monotone" dataKey="totalTareas" name="Tareas" stroke="var(--accent)" strokeWidth={2} dot={{ r:3 }} />
-          <Line type="monotone" dataKey="totalIds" name="IDs" stroke="var(--accent2)" strokeWidth={2} dot={{ r:3 }} />
-        </LineChart>
+          <XAxis dataKey="week" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={v=>`Sem ${v}`} />
+          <YAxis yAxisId="left" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={formatNumber} />
+          <YAxis yAxisId="right" orientation="right" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={formatNumber} />
+          <Tooltip content={<CustomTooltip labelFormatter={v=>`Semana ${v}`} valueFormatter={formatNumber} />} />
+          <Legend wrapperStyle={{ fontSize:'0.72rem', color:'var(--text3)' }} />
+          <Bar yAxisId="left" dataKey="totalTareas" name="Tareas" fill="var(--accent)" radius={[3,3,0,0]} />
+          <Line yAxisId="right" type="monotone" dataKey="totalIds" name="IDs trabajados" stroke="#fb923c" strokeWidth={2} dot={{ r:3 }} />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   )
@@ -365,18 +388,19 @@ function GraficoCalSemanal({ usuario, auditados }) {
   return (
     <div className="card">
       <div className="card-header">
-        <div className="card-title">Evolución de calidad semanal</div>
-        <div className="card-subtitle">Efectividad por sugerencia semana a semana. Línea roja = target 90%.</div>
+        <div className="card-title">¿El sistema mejora o empeora?</div>
+        <div className="card-subtitle">Línea roja = target 90%. Si un patrón crece sostenidamente, ya es riesgo aunque no sea lo más grande.</div>
       </div>
-      <ResponsiveContainer width="100%" height={200}>
+      <ResponsiveContainer width="100%" height={210}>
         <LineChart data={data} margin={{ top:5, right:10, left:0, bottom:5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis dataKey="week" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={v=>`S${v}`} />
-          <YAxis tick={{ fill:'var(--text3)', fontSize:11 }} domain={[0.5, 1]} tickFormatter={v=>`${Math.round(v*100)}%`} />
+          <YAxis tick={{ fill:'var(--text3)', fontSize:11 }} domain={[0.5,1]} tickFormatter={v=>`${Math.round(v*100)}%`} />
           <Tooltip content={<CustomTooltip valueFormatter={v=>`${Math.round(v*100)}%`} labelFormatter={v=>`Semana ${v}`} />} />
           <Legend wrapperStyle={{ fontSize:'0.75rem', color:'var(--text3)' }} />
           <Line type="monotone" dataKey={()=>0.9} name="Target 90%" stroke="var(--red)" strokeWidth={1} strokeDasharray="4 2" dot={false} legendType="none" />
-          <Line type="monotone" dataKey="efectividad" name="Ef. sugerencias" stroke="var(--green)" strokeWidth={2} dot={{ r:3 }} />
+          <Line type="monotone" dataKey="efectividadSug" name="Por sugerencia_id (principal)" stroke="var(--green)" strokeWidth={2} dot={{ r:3 }} />
+          <Line type="monotone" dataKey="efectividadCaso" name="Por id_caso (contextual)" stroke="var(--accent2)" strokeWidth={2} strokeDasharray="5 3" dot={{ r:3 }} />
         </LineChart>
       </ResponsiveContainer>
     </div>
