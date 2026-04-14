@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { readFromURL, writeToURL } from '../utils/selectors/queryState.js'
 
-const EMPTY_CAL = { auditor: null, dominio: null, suggestionReason: null, calidad: null }
+const EMPTY_CAL = { auditor: null, dominio: null, suggestionReason: null, calidad: null, colaborador: null }
 
 const CAL_LABELS = {
   correcto: 'Correcto', desvio_leve: 'Desvío leve',
@@ -20,11 +20,13 @@ export function useCalidadFilters(globalFiltered) {
     dominio: url.dominio || null,
     suggestionReason: url.suggestionReason || null,
     calidad: url.calidad || null,
+    colaborador: url.calColab || null,
   })
 
   useEffect(() => {
     writeToURL({ auditor: calFilters.auditor, dominio: calFilters.dominio,
-                 suggestionReason: calFilters.suggestionReason, calidad: calFilters.calidad })
+                 suggestionReason: calFilters.suggestionReason, calidad: calFilters.calidad,
+                 calColab: calFilters.colaborador })
   }, [calFilters])
 
   const setCalFilter = useCallback((key, value) => {
@@ -40,6 +42,7 @@ export function useCalidadFilters(globalFiltered) {
       if (calFilters.dominio && r.dominio !== calFilters.dominio) return false
       if (calFilters.suggestionReason && r.suggestionReason !== calFilters.suggestionReason) return false
       if (calFilters.calidad && r.calidad !== calFilters.calidad) return false
+      if (calFilters.colaborador && r.usuario !== calFilters.colaborador) return false
       return true
     })
   }, [globalFiltered?.auditados, calFilters])
@@ -48,7 +51,7 @@ export function useCalidadFilters(globalFiltered) {
     const chips = []
     const meta = {
       auditor: 'Auditor', dominio: 'Dominio',
-      suggestionReason: 'Código', calidad: 'Desvío',
+      suggestionReason: 'Código', calidad: 'Desvío', colaborador: 'Colaborador',
     }
     for (const [key, label] of Object.entries(meta)) {
       const val = calFilters[key]

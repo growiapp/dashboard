@@ -70,6 +70,18 @@ export default function App() {
 
   const filteredWithCal = useMemo(() => ({ ...filtered, auditados: auditadosFiltrados }), [filtered, auditadosFiltrados])
 
+  const optionsWithCal = useMemo(() => {
+    const aud = filtered?.auditados || []
+    const counts = new Map()
+    for (const r of aud) {
+      if (r.usuario) counts.set(r.usuario, (counts.get(r.usuario) || 0) + 1)
+    }
+    const colaboradoresCalidad = [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([v, count]) => ({ value: v, label: v, count }))
+    return { ...options, colaboradoresCalidad }
+  }, [options, filtered?.auditados])
+
   // MAO: aplicar mismo filtrado global (fecha, usuario, equipo, rol, etc.)
   const auditadosMaoFiltrados = useMemo(() => {
     const mao = joinedData.auditados_mao || []
@@ -186,7 +198,7 @@ export default function App() {
       </nav>
 
       <FiltersBar
-        filters={filters} options={options}
+        filters={filters} options={optionsWithCal}
         setFilter={setFilter} resetFilters={resetFilters}
         calFilters={calFilters} setCalFilter={setCalFilter}
         resetCalFilters={resetCalFilters}
@@ -209,7 +221,7 @@ export default function App() {
             {activeTab === 'calidad'       && <CalidadModule model={model} auditados={filteredWithCal.auditados} auditadosMao={auditadosMaoFiltrados}/>}
             {activeTab === 'friccion'      && <FriccionModule model={model} holdSnapshot={hold||[]} holdLoadedAt={loadedAt} historicoCompleto={historico||[]} filters={filters}/>}
             {activeTab === 'equipo'        && <EquipoModule model={model} equipo={equipo||[]} equipoError={errors?.equipo} navigateTo={navigateTo} setFilter={setFilter}/>}
-            {activeTab === 'individual'    && <IndividualModule model={model} equipo={equipo||[]} options={options}/>}
+            {activeTab === 'individual'    && <IndividualModule model={model} equipo={equipo||[]} options={options} filteredHistorico={model.filteredHistorico||[]} auditados={filteredWithCal.auditados||[]}/>}
           </>
         )}
       </main>

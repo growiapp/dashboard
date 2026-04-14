@@ -93,11 +93,14 @@ export function FiltersBar({
 
       {/* Panel contextual de Calidad */}
       {isCalidad && advOpen && (
-        <div className="filters-advanced-panel">
-          <span className="filter-label">Solo en Calidad:</span>
+        <div className="filters-advanced-panel" style={{ flexWrap:'wrap', gap:'0.5rem 0.75rem', alignItems:'center' }}>
+          <span className="filter-label" style={{ flexBasis:'100%', marginBottom:'-0.25rem' }}>Solo en Calidad:</span>
           <Sel value={calFilters.auditor||''} onChange={v=>setCalFilter('auditor',v||null)}
             label={COPY.filtros.auditor} placeholder={COPY.placeholder.auditor}
             opts={options.auditores||[]} />
+          <Sel value={calFilters.colaborador||''} onChange={v=>setCalFilter('colaborador',v||null)}
+            label="Colaborador auditado" placeholder="Todos los colaboradores"
+            opts={options.colaboradoresCalidad||[]} />
           <Sel value={calFilters.dominio||''} onChange={v=>setCalFilter('dominio',v||null)}
             label={COPY.filtros.dominio} placeholder={COPY.placeholder.dominio}
             opts={options.dominios||[]} />

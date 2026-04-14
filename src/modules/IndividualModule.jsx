@@ -1,9 +1,39 @@
 import { useMemo, useState } from 'react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { formatNumber } from '../utils/parsers.js'
 import { CALIDAD_COLORS } from '../utils/normalizers.js'
 import { COPY } from '../config/copy.js'
 import { labelSegmento } from '../config/segments.js'
-import { KPICard, EmptyState, CalidadBar } from '../components/ui/index.jsx'
+import { KPICard, EmptyState, CalidadBar, CustomTooltip } from '../components/ui/index.jsx'
+
+function semanalProductividad(historico, usuario) {
+  const map = new Map()
+  for (const r of (historico || [])) {
+    if (r.usuario !== usuario || !r.week) continue
+    if (!map.has(r.week)) map.set(r.week, { week: r.week, totalTareas: 0, totalIds: 0, dias: new Set() })
+    const e = map.get(r.week)
+    e.totalTareas += 1
+    e.totalIds    += r.idsTC ?? 1
+    if (r.fechaKey) e.dias.add(r.fechaKey)
+  }
+  return [...map.values()]
+    .map(e => ({ ...e, diasHabiles: e.dias.size, promTareasPorDia: e.dias.size > 0 ? Math.round(e.totalTareas / e.dias.size) : 0 }))
+    .sort((a, b) => a.week - b.week)
+}
+
+function semanalCalidad(auditados, usuario) {
+  const map = new Map()
+  for (const r of (auditados || [])) {
+    if (r.usuario !== usuario || !r.week) continue
+    if (!map.has(r.week)) map.set(r.week, { week: r.week, total: 0, correcto: 0 })
+    const e = map.get(r.week)
+    e.total++
+    if (r.calidad === 'correcto') e.correcto++
+  }
+  return [...map.values()]
+    .map(e => ({ ...e, efectividad: e.total > 0 ? e.correcto / e.total : 0 }))
+    .sort((a, b) => a.week - b.week)
+}
 
 const MODOS = [
   { id: 'individual', label: 'Individual' },
@@ -305,7 +335,55 @@ function MetricRow({ label, value, valueColor, highlight, note }) {
   )
 }
 
-export function IndividualModule({ model, equipo, options }) {
+function GraficoProdSemanal({ usuario, filteredHistorico }) {
+  const data = useMemo(() => semanalProductividad(filteredHistorico, usuario), [filteredHistorico, usuario])
+  if (data.length < 2) return null
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">Tendencia semanal — Tareas e IDs</div>
+        <div className="card-subtitle">Evolución semana a semana en el período filtrado.</div>
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={data} margin={{ top:5, right:10, left:0, bottom:5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+          <XAxis dataKey="week" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={v=>`S${v}`} />
+          <YAxis tick={{ fill:'var(--text3)', fontSize:11 }} />
+          <Tooltip content={<CustomTooltip labelFormatter={v=>`Semana ${v}`} />} />
+          <Legend wrapperStyle={{ fontSize:'0.75rem', color:'var(--text3)' }} />
+          <Line type="monotone" dataKey="totalTareas" name="Tareas" stroke="var(--accent)" strokeWidth={2} dot={{ r:3 }} />
+          <Line type="monotone" dataKey="totalIds" name="IDs" stroke="var(--accent2)" strokeWidth={2} dot={{ r:3 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function GraficoCalSemanal({ usuario, auditados }) {
+  const data = useMemo(() => semanalCalidad(auditados, usuario), [auditados, usuario])
+  if (data.length < 2) return null
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">Evolución de calidad semanal</div>
+        <div className="card-subtitle">Efectividad por sugerencia semana a semana. Línea roja = target 90%.</div>
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={data} margin={{ top:5, right:10, left:0, bottom:5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+          <XAxis dataKey="week" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={v=>`S${v}`} />
+          <YAxis tick={{ fill:'var(--text3)', fontSize:11 }} domain={[0.5, 1]} tickFormatter={v=>`${Math.round(v*100)}%`} />
+          <Tooltip content={<CustomTooltip valueFormatter={v=>`${Math.round(v*100)}%`} labelFormatter={v=>`Semana ${v}`} />} />
+          <Legend wrapperStyle={{ fontSize:'0.75rem', color:'var(--text3)' }} />
+          <Line type="monotone" dataKey={()=>0.9} name="Target 90%" stroke="var(--red)" strokeWidth={1} strokeDasharray="4 2" dot={false} legendType="none" />
+          <Line type="monotone" dataKey="efectividad" name="Ef. sugerencias" stroke="var(--green)" strokeWidth={2} dot={{ r:3 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export function IndividualModule({ model, equipo, options, filteredHistorico, auditados }) {
   const [modo, setModo] = useState('individual')
 
   // Individual
@@ -547,6 +625,12 @@ export function IndividualModule({ model, equipo, options }) {
                   </div>
                 </div>
               )}
+
+              {/* Evolución semanal productiva */}
+              <GraficoProdSemanal usuario={user1} filteredHistorico={filteredHistorico} />
+
+              {/* Evolución semanal calidad */}
+              <GraficoCalSemanal usuario={user1} auditados={auditados} />
 
               {/* Distribución por flujo */}
               {perfilIndividual.finUser && Object.entries(perfilIndividual.finUser.byFlujo||{}).some(([,v])=>v>0) && (

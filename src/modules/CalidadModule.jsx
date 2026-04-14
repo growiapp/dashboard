@@ -42,22 +42,36 @@ function FuenteToggle({ value, onChange, hasMao }) {
 export function CalidadModule({ model, auditados, auditadosMao }) {
   const { calidadModel } = model
   const [fuente, setFuente] = useState('sdc')
+  const [semanaAud, setSemanaAud] = useState(null)
 
   const hasMao = (auditadosMao?.length || 0) > 0
 
-    const auditadosActivos = useMemo(() => {
+  const auditadosActivos = useMemo(() => {
     if (fuente === 'mao')       return auditadosMao || []
     if (fuente === 'combinado') return [...(auditados || []), ...(auditadosMao || [])]
     return auditados || []
   }, [fuente, auditados, auditadosMao])
 
-    const kpis          = useMemo(() => calcCalidadKPIs(auditadosActivos), [auditadosActivos])
-  const porUsuario    = useMemo(() => calidadPorUsuario(auditadosActivos), [auditadosActivos])
-  const porAuditor_   = useMemo(() => calidadPorAuditor(auditadosActivos), [auditadosActivos])
-  const porDominio    = useMemo(() => calidadPorDominio(auditadosActivos), [auditadosActivos])
-  const porError_     = useMemo(() => calidadPorError(auditadosActivos), [auditadosActivos])
-  const concentracion = useMemo(() => concentracionDesvios(auditadosActivos), [auditadosActivos])
-  const porSemana     = useMemo(() => calidadPorSemana(auditadosActivos), [auditadosActivos])
+  const semanasDisponibles = useMemo(() => {
+    const counts = new Map()
+    for (const r of auditadosActivos) {
+      if (r.week) counts.set(r.week, (counts.get(r.week) || 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => a[0] - b[0]).map(([w, n]) => ({ week: w, n }))
+  }, [auditadosActivos])
+
+  const auditadosFiltradosSemana = useMemo(() => {
+    if (!semanaAud) return auditadosActivos
+    return auditadosActivos.filter(r => r.week === semanaAud)
+  }, [auditadosActivos, semanaAud])
+
+    const kpis          = useMemo(() => calcCalidadKPIs(auditadosFiltradosSemana), [auditadosFiltradosSemana])
+  const porUsuario    = useMemo(() => calidadPorUsuario(auditadosFiltradosSemana), [auditadosFiltradosSemana])
+  const porAuditor_   = useMemo(() => calidadPorAuditor(auditadosFiltradosSemana), [auditadosFiltradosSemana])
+  const porDominio    = useMemo(() => calidadPorDominio(auditadosFiltradosSemana), [auditadosFiltradosSemana])
+  const porError_     = useMemo(() => calidadPorError(auditadosFiltradosSemana), [auditadosFiltradosSemana])
+  const concentracion = useMemo(() => concentracionDesvios(auditadosFiltradosSemana), [auditadosFiltradosSemana])
+  const porSemana     = useMemo(() => calidadPorSemana(auditadosFiltradosSemana), [auditadosFiltradosSemana])
 
   const { sorted: errorSorted, sortKey: errSortKey, sortDir: errSortDir, onSort: errOnSort } = useTableSort(porError_ || [], porError_ || [])
   const { sorted: auditorSorted, sortKey: audSortKey, sortDir: audSortDir, onSort: audOnSort } = useTableSort(porAuditor_ || [], porAuditor_ || [])
@@ -144,10 +158,48 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
           <FuenteToggle value={fuente} onChange={setFuente} hasMao={hasMao} />
         </div>
         <span style={{ fontSize:'0.72rem', color:'var(--text3)' }}>
-          {fuenteLabel} · {formatNumber(auditadosActivos.length)} registros
+          {fuenteLabel} · {formatNumber(auditadosFiltradosSemana.length)} registros
+          {semanaAud && <span style={{ marginLeft:6, color:'var(--accent)', fontWeight:600 }}>· Sem {semanaAud}</span>}
           {!hasMao && <span style={{ marginLeft:8, color:'var(--text3)', fontStyle:'italic' }}>MAO: subí auditados_mao.csv para activar</span>}
         </span>
       </div>
+
+      {semanasDisponibles.length > 1 && (
+        <div style={{ display:'flex', alignItems:'center', gap:'0.5rem', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'0.72rem', color:'var(--text3)', fontWeight:600 }}>Semana de auditoría:</span>
+          <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', overflow:'hidden' }}>
+            <button
+              onClick={() => setSemanaAud(null)}
+              style={{
+                padding:'0.28rem 0.75rem', fontSize:'0.75rem', border:'none', cursor:'pointer',
+                fontWeight: semanaAud === null ? 700 : 400,
+                background: semanaAud === null ? 'var(--accent)' : 'transparent',
+                color: semanaAud === null ? '#fff' : 'var(--text2)',
+                borderRight:'1px solid var(--border)',
+              }}
+            >Todas</button>
+            {semanasDisponibles.map(({ week, n }) => (
+              <button key={week}
+                onClick={() => setSemanaAud(semanaAud === week ? null : week)}
+                style={{
+                  padding:'0.28rem 0.65rem', fontSize:'0.75rem', border:'none', cursor:'pointer',
+                  fontWeight: semanaAud === week ? 700 : 400,
+                  background: semanaAud === week ? 'var(--accent)' : 'transparent',
+                  color: semanaAud === week ? '#fff' : 'var(--text2)',
+                  borderRight:'1px solid var(--border)',
+                }}
+                title={`${n} registros`}
+              >S{week}</button>
+            ))}
+          </div>
+          {semanaAud && (
+            <button onClick={() => setSemanaAud(null)}
+              style={{ fontSize:'0.72rem', color:'var(--text3)', background:'none', border:'none', cursor:'pointer', padding:'0 4px' }}>
+              ✕ Ver todas
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="metric-note">
         📊 {COPY.modules.calidadPrincipal}
