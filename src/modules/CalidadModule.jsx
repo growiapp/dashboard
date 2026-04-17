@@ -31,22 +31,93 @@ function exportCSV(rows, filename) {
 }
 
 // ── Tabla inline de casos auditados ───────────────────────────────────────────
-function TablaCasosInline({ rows, titulo, onClose }) {
+// ── Helpers de links ──────────────────────────────────────────────────────────
+const SITE_MAP = {
+  MLB: { dominio: 'produto.mercadolivre.com.br', subdominio: 'produto.mercadolivre.com.br' },
+  MCO: { dominio: 'articulo.mercadolibre.com.co', subdominio: 'articulo.mercadolibre.com.co' },
+  MLA: { dominio: 'articulo.mercadolibre.com.ar', subdominio: 'articulo.mercadolibre.com.ar' },
+  MPE: { dominio: 'articulo.mercadolibre.com.pe', subdominio: 'articulo.mercadolibre.com.pe' },
+  MLU: { dominio: 'articulo.mercadolibre.com.uy', subdominio: 'articulo.mercadolibre.com.uy' },
+  MLC: { dominio: 'articulo.mercadolibre.cl',     subdominio: 'articulo.mercadolibre.cl' },
+  MLM: { dominio: 'articulo.mercadolibre.com.mx', subdominio: 'articulo.mercadolibre.com.mx' },
+}
+
+function getSitePrefix(id) {
+  if (!id) return null
+  return id.slice(0, 3).toUpperCase()
+}
+
+function buildPdpLink(pdpId, pdpLinkFallback) {
+  if (pdpLinkFallback) return pdpLinkFallback
+  if (!pdpId) return null
+  const prefix = getSitePrefix(pdpId)
+  const site = SITE_MAP[prefix]
+  if (!site) return null
+  return `https://${site.dominio}/p/${pdpId}`
+}
+
+function buildItemLink(itemId, itemLinkFallback) {
+  if (itemLinkFallback) return itemLinkFallback
+  if (!itemId) return null
+  const prefix = getSitePrefix(itemId)
+  const site = SITE_MAP[prefix]
+  if (!site) return null
+  // Insertar guion entre sigla y números: MLB3188360950 → MLB-3188360950
+  const numeros = itemId.slice(3)
+  return `https://${site.dominio}/${prefix}-${numeros}`
+}
+
+function ExternalLink({ href, label }) {
+  if (!href) return <span style={{ color:'var(--text3)', fontSize:'0.75rem' }}>{label || '—'}</span>
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer"
+      style={{ color:'var(--accent)', fontSize:'0.75rem', textDecoration:'none', fontFamily:'monospace' }}
+      onClick={e => e.stopPropagation()}
+    >
+      {label} ↗
+    </a>
+  )
+}
+
+// ── Tabla de casos inline ─────────────────────────────────────────────────────
+function TablaCasosInline({ rows, titulo, onClose, fuente, calidad }) {
   if (!rows?.length) return (
     <div style={{ padding:'0.75rem', fontSize:'0.8rem', color:'var(--text3)' }}>Sin casos para mostrar.</div>
   )
-  const csvRows = rows.map(r => ({
-    id_caso: r.idCaso || r.sugerenciaId || '—',
-    usuario: r.usuario || '—',
-    auditor: r.auditor || '—',
-    dominio: r.dominio || '—',
-    calidad: r.calidad || '—',
-    semana: r.week || '—',
-  }))
+
+  const esMao = fuente === 'mao'
+  const mostrarCodigos = calidad === 'desvio_leve' || calidad === 'desvio_grave'
+
+  const csvRows = rows.map(r => {
+    const base = {
+      usuario: r.usuario || '—',
+      auditor: r.auditor || '—',
+      dominio: r.dominio || '—',
+      calidad: r.calidad || '—',
+      semana: r.week ? `Sem ${r.week}` : '—',
+    }
+    if (esMao) {
+      return {
+        id_pdp: r.pdpId || '—',
+        id_item: r.itemId || '—',
+        ...base,
+        ...(mostrarCodigos ? { codigo_utilizado: r.resolucion || '—', codigo_correcto: r.accionCorrecta || '—' } : {}),
+      }
+    }
+    return {
+      id_caso: r.idCaso || '—',
+      id_sugerencia: r.sugerenciaId || '—',
+      ...base,
+      ...(mostrarCodigos ? { codigo_utilizado: r.suggestionReason || '—', codigo_correcto: r.accionCorrecta || '—' } : {}),
+    }
+  })
+
   return (
     <div style={{ marginTop:'0.75rem', borderTop:'1px solid var(--border)', paddingTop:'0.75rem' }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.5rem' }}>
-        <span style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--text2)' }}>{titulo} — {rows.length} registros</span>
+        <span style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--text2)' }}>
+          {titulo} — {rows.length} registros
+        </span>
         <div style={{ display:'flex', gap:'0.5rem' }}>
           <button onClick={() => exportCSV(csvRows, 'detalle_calidad.csv')}
             style={{ fontSize:'0.72rem', padding:'0.2rem 0.6rem', background:'var(--bg3)', border:'1px solid var(--border)',
@@ -60,27 +131,101 @@ function TablaCasosInline({ rows, titulo, onClose }) {
           </button>
         </div>
       </div>
-      <div className="table-wrap" style={{ maxHeight:320, overflowY:'auto' }}>
-        <table>
+      <div className="table-wrap" style={{ maxHeight:360, overflowY:'auto', overflowX:'hidden' }}>
+        <table style={{ tableLayout:'fixed', width:'100%' }}>
+          <colgroup>
+            {esMao ? (
+              <>
+                <col style={{ width: mostrarCodigos ? '14%' : '18%' }} /> {/* ID PDP */}
+                <col style={{ width: mostrarCodigos ? '14%' : '18%' }} /> {/* ID ITEM */}
+                <col style={{ width: mostrarCodigos ? '10%' : '14%' }} /> {/* Usuario */}
+                <col style={{ width: mostrarCodigos ? '10%' : '14%' }} /> {/* Auditor */}
+                <col style={{ width: mostrarCodigos ? '14%' : '18%' }} /> {/* Dominio */}
+                <col style={{ width: mostrarCodigos ? '10%' : '14%' }} /> {/* Calidad */}
+                <col style={{ width: mostrarCodigos ? '6%'  : '8%'  }} /> {/* Semana */}
+                {mostrarCodigos && <col style={{ width:'11%' }} />}         {/* Código utilizado */}
+                {mostrarCodigos && <col style={{ width:'11%' }} />}         {/* Código correcto */}
+              </>
+            ) : (
+              <>
+                <col style={{ width: mostrarCodigos ? '14%' : '18%' }} /> {/* ID CASO */}
+                <col style={{ width: mostrarCodigos ? '12%' : '16%' }} /> {/* ID SUGERENCIA */}
+                <col style={{ width: mostrarCodigos ? '10%' : '14%' }} /> {/* Usuario */}
+                <col style={{ width: mostrarCodigos ? '10%' : '14%' }} /> {/* Auditor */}
+                <col style={{ width: mostrarCodigos ? '14%' : '18%' }} /> {/* Dominio */}
+                <col style={{ width: mostrarCodigos ? '10%' : '12%' }} /> {/* Calidad */}
+                <col style={{ width: mostrarCodigos ? '6%'  : '8%'  }} /> {/* Semana */}
+                {mostrarCodigos && <col style={{ width:'12%' }} />}         {/* Código utilizado */}
+                {mostrarCodigos && <col style={{ width:'12%' }} />}         {/* Código correcto */}
+              </>
+            )}
+          </colgroup>
           <thead>
             <tr>
-              <th>ID Caso</th>
+              {esMao ? (
+                <>
+                  <th>ID PDP</th>
+                  <th>ID ITEM</th>
+                </>
+              ) : (
+                <>
+                  <th>ID CASO</th>
+                  <th>ID SUGERENCIA</th>
+                </>
+              )}
               <th>Usuario</th>
               <th>Auditor</th>
               <th>Dominio</th>
               <th>Calidad</th>
-              <th>Semana</th>
+              <th>Sem.</th>
+              {mostrarCodigos && <th>Código utilizado</th>}
+              {mostrarCodigos && <th>Código correcto</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                <td style={{ fontFamily:'monospace', fontSize:'0.75rem' }}>{r.idCaso || r.sugerenciaId || '—'}</td>
-                <td>{r.usuario || '—'}</td>
-                <td style={{ color:'var(--text3)' }}>{r.auditor || '—'}</td>
-                <td style={{ color:'var(--text3)' }}>{r.dominio || '—'}</td>
-                <td><span style={{ color: CALIDAD_COLORS[r.calidad], fontWeight:600 }}>{CALIDAD_LABELS[r.calidad] || r.calidad}</span></td>
-                <td style={{ color:'var(--text3)' }}>{r.week ? `Sem ${r.week}` : '—'}</td>
+                {esMao ? (
+                  <>
+                    <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      <ExternalLink href={buildPdpLink(r.pdpId, r.pdpLink)} label={r.pdpId || '—'} />
+                    </td>
+                    <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      <ExternalLink href={buildItemLink(r.itemId, r.itemLink)} label={r.itemId || '—'} />
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {r.idCaso
+                        ? <ExternalLink href={`https://catalog-domains.adminml.com/ruler/product-suggestions/${r.idCaso}`} label={r.idCaso} />
+                        : <span style={{ color:'var(--text3)' }}>—</span>
+                      }
+                    </td>
+                    <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontFamily:'monospace', fontSize:'0.75rem', color:'var(--text2)' }}>
+                      {r.sugerenciaId || '—'}
+                    </td>
+                  </>
+                )}
+                <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.78rem' }}>{r.usuario || '—'}</td>
+                <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.78rem', color:'var(--text3)' }}>{r.auditor || '—'}</td>
+                <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.75rem', color:'var(--text3)' }}>{r.dominio || '—'}</td>
+                <td>
+                  <span style={{ color: CALIDAD_COLORS[r.calidad], fontWeight:600, fontSize:'0.75rem', whiteSpace:'nowrap' }}>
+                    {CALIDAD_LABELS[r.calidad] || r.calidad}
+                  </span>
+                </td>
+                <td style={{ color:'var(--text3)', fontSize:'0.75rem' }}>{r.week ? `S${r.week}` : '—'}</td>
+                {mostrarCodigos && (
+                  <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.75rem', color:'var(--text2)' }}>
+                    {(esMao ? r.resolucion : r.suggestionReason) || '—'}
+                  </td>
+                )}
+                {mostrarCodigos && (
+                  <td style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.75rem', color:'var(--text2)' }}>
+                    {r.accionCorrecta || '—'}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -91,16 +236,17 @@ function TablaCasosInline({ rows, titulo, onClose }) {
 }
 
 // ── Cards de distribución clicables ──────────────────────────────────────────
-function DistribCard({ cat, val, total, isSelected, onToggle }) {
+function DistribCard({ cat, val, total, isSelected, onToggle, combinado }) {
   return (
     <div
-      onClick={onToggle}
+      onClick={combinado ? undefined : onToggle}
       style={{
         background:'var(--bg3)',
         border:`1px solid ${isSelected ? CALIDAD_COLORS[cat] : CALIDAD_COLORS[cat]+'40'}`,
         borderLeft:`3px solid ${CALIDAD_COLORS[cat]}`,
         borderRadius:'var(--radius-sm)',
-        padding:'0.5rem 0.85rem', minWidth:130, cursor:'pointer',
+        padding:'0.5rem 0.85rem', minWidth:130,
+        cursor: combinado ? 'default' : 'pointer',
         transition:'box-shadow 0.15s, border-color 0.15s',
         boxShadow: isSelected ? `0 0 0 2px ${CALIDAD_COLORS[cat]}60` : 'none',
       }}
@@ -108,9 +254,11 @@ function DistribCard({ cat, val, total, isSelected, onToggle }) {
       <div style={{ fontSize:'0.7rem', color:'var(--text3)', marginBottom:'0.1rem' }}>{CALIDAD_LABELS[cat]}</div>
       <div style={{ fontSize:'1.2rem', fontWeight:700, color:CALIDAD_COLORS[cat] }}>{formatNumber(val)}</div>
       <div style={{ fontSize:'0.7rem', color:'var(--text3)' }}>{total>0?Math.round(val/total*100):0}%</div>
-      <div style={{ fontSize:'0.65rem', color: isSelected ? CALIDAD_COLORS[cat] : 'var(--text3)', marginTop:3 }}>
-        {isSelected ? '▲ Ocultar' : '▼ Ver casos'}
-      </div>
+      {!combinado && (
+        <div style={{ fontSize:'0.65rem', color: isSelected ? CALIDAD_COLORS[cat] : 'var(--text3)', marginTop:3 }}>
+          {isSelected ? '▲ Ocultar' : '▼ Ver casos'}
+        </div>
+      )}
     </div>
   )
 }
@@ -488,6 +636,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
                   total={kpis.totalSugs}
                   isSelected={distribSelected?.grupo==='sug' && distribSelected?.cat===cat}
                   onToggle={() => toggleDistrib('sug', cat)}
+                  combinado={fuente === 'combinado'}
                 />
               ))}
             </div>
@@ -507,6 +656,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
                     total={kpis.totalCasos}
                     isSelected={distribSelected?.grupo==='caso' && distribSelected?.cat===cat}
                     onToggle={() => toggleDistrib('caso', cat)}
+                    combinado={fuente === 'combinado'}
                   />
                 ))}
               </div>
@@ -515,12 +665,14 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
         </div>
 
         {/* Panel de detalle — ancho completo, debajo de las dos columnas */}
-        {distribSelected && (
+        {distribSelected && fuente !== 'combinado' && (
           <div style={{ marginTop:'1rem', borderTop:'1px solid var(--border)', paddingTop:'0.75rem' }}>
             <TablaCasosInline
               rows={distribFilas}
               titulo={`${CALIDAD_LABELS[distribSelected.cat]} — ${distribSelected.grupo === 'sug' ? vocab.labelDistribucion : vocab.labelDistribucionCaso}`}
               onClose={() => setDistribSelected(null)}
+              fuente={fuente}
+              calidad={distribSelected.cat}
             />
           </div>
         )}
