@@ -355,24 +355,73 @@ function MetricRow({ label, value, valueColor, highlight, note }) {
   )
 }
 
+function agruparDiarioInd(historico, usuario) {
+  const map = new Map()
+  for (const r of (historico || [])) {
+    if (r.usuario !== usuario || !r.fechaKey) continue
+    if (!map.has(r.fechaKey)) map.set(r.fechaKey, { key: r.fechaKey, totalTareas: 0, totalIds: 0 })
+    const e = map.get(r.fechaKey)
+    e.totalTareas += 1
+    e.totalIds    += r.idsTC ?? 1
+  }
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key))
+}
+
+function agruparMensualInd(historico, usuario) {
+  const map = new Map()
+  for (const r of (historico || [])) {
+    if (r.usuario !== usuario || !r.fecha) continue
+    const mes = `${r.fecha.getFullYear()}-${String(r.fecha.getMonth()+1).padStart(2,'0')}`
+    if (!map.has(mes)) map.set(mes, { key: mes, totalTareas: 0, totalIds: 0 })
+    const e = map.get(mes)
+    e.totalTareas += 1
+    e.totalIds    += r.idsTC ?? 1
+  }
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key))
+}
+
 function GraficoProdSemanal({ usuario, filteredHistorico }) {
-  const data = useMemo(() => semanalProductividad(filteredHistorico, usuario), [filteredHistorico, usuario])
-  if (data.length < 2) return null
+  const [gran, setGran] = useState('semanal')
+  const dataSemanal = useMemo(() => semanalProductividad(filteredHistorico, usuario), [filteredHistorico, usuario])
+  const dataDiario  = useMemo(() => agruparDiarioInd(filteredHistorico, usuario), [filteredHistorico, usuario])
+  const dataMensual = useMemo(() => agruparMensualInd(filteredHistorico, usuario), [filteredHistorico, usuario])
+
+  const data = gran === 'diario' ? dataDiario : gran === 'mensual' ? dataMensual
+    : dataSemanal.map(s => ({ ...s, key: s.week }))
+
+  if (dataSemanal.length < 2) return null
   return (
     <div className="card">
       <div className="card-header">
         <div>
-          <div className="card-title">Tendencia semanal — Tareas e IDs</div>
+          <div className="card-title">Tendencia — Tareas e IDs</div>
           <div className="card-subtitle">Barras = tareas · Línea = IDs trabajados. Si divergen, la complejidad promedio cambió.</div>
+        </div>
+        <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', overflow:'hidden' }}>
+          {['Diario','Semanal','Mensual'].map(g => {
+            const id = g.toLowerCase()
+            return (
+              <button key={id} onClick={() => setGran(id)}
+                style={{
+                  padding:'0.25rem 0.7rem', fontSize:'0.72rem', fontWeight: gran===id ? 700 : 400,
+                  background: gran===id ? 'var(--accent)' : 'transparent',
+                  color: gran===id ? '#fff' : 'var(--text2)',
+                  border:'none', cursor:'pointer', borderRight:'1px solid var(--border)',
+                }}>{g}</button>
+            )
+          })}
         </div>
       </div>
       <ResponsiveContainer width="100%" height={240}>
         <ComposedChart data={data} margin={{ top:5, right:40, left:0, bottom:5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-          <XAxis dataKey="week" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={v=>`Sem ${v}`} />
+          <XAxis dataKey="key" tick={{ fill:'var(--text3)', fontSize:11 }}
+            tickFormatter={v => gran === 'semanal' ? `Sem ${v}` : gran === 'diario' ? v?.slice(5)||v : v} />
           <YAxis yAxisId="left" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={formatNumber} />
           <YAxis yAxisId="right" orientation="right" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={formatNumber} />
-          <Tooltip content={<CustomTooltip labelFormatter={v=>`Semana ${v}`} valueFormatter={formatNumber} />} />
+          <Tooltip content={<CustomTooltip
+            labelFormatter={v => gran === 'semanal' ? `Semana ${v}` : v}
+            valueFormatter={formatNumber} />} />
           <Legend wrapperStyle={{ fontSize:'0.72rem', color:'var(--text3)' }} />
           <Bar yAxisId="left" dataKey="totalTareas" name="Tareas" fill="var(--accent)" radius={[3,3,0,0]} />
           <Line yAxisId="right" type="monotone" dataKey="totalIds" name="IDs trabajados" stroke="#fb923c" strokeWidth={2} dot={{ r:3 }} />
@@ -513,29 +562,27 @@ export function IndividualModule({ model, equipo, options, filteredHistorico, au
                 </div>
               </div>
 
-              {/* KPIs individuales */}
+              {/* ── 1. KPIs: 6 cards en UNA sola línea ─────────────── */}
               {perfilIndividual.finUser ? (
                 <>
                   <div className="metric-note metric-note-important">ℹ️ Tareas y IDs son métricas distintas. Una tarea puede involucrar varios IDs.</div>
-                  <div className="grid grid-4">
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(6, 1fr)', gap:'0.75rem' }}>
                     <KPICard label="Tareas" value={formatNumber(perfilIndividual.finUser.totalTareas)}
-                      sub="Registros que pasaron a DONE." icon="📦" />
+                      sub="Registros DONE." icon="📦" />
                     <KPICard label="IDs trabajados" value={formatNumber(perfilIndividual.finUser.totalIds)}
-                      sub="Productos distintos accionados." icon="🔗" color="#38bdf8" />
+                      sub="Productos accionados." icon="🔗" color="#38bdf8" />
                     <KPICard label="IDs por tarea" value={`${perfilIndividual.finUser.relIdsPorTarea}x`}
-                      sub="Complejidad promedio por tarea." icon="🔄" color="var(--slate)" />
-                    <KPICard label="Tareas por día activo" value={formatNumber(perfilIndividual.finUser.promTareasPorDia)}
-                      sub="En días con actividad real." icon="⚡" color="var(--green)" />
+                      sub="Complejidad." icon="🔄" color="var(--slate)" />
+                    <KPICard label="Tareas/día activo" value={formatNumber(perfilIndividual.finUser.promTareasPorDia)}
+                      sub="Días con actividad." icon="⚡" color="var(--green)" />
+                    <KPICard label="Días activos" value={perfilIndividual.finUser.diasHabiles}
+                      sub="Con al menos 1 tarea." icon="📅" color="var(--accent2)" />
+                    <KPICard label="Registros HOLD" value={perfilIndividual.holdUser ? formatNumber(perfilIndividual.holdUser.total) : '—'}
+                      sub={perfilIndividual.holdUser && perfilIndividual.finUser.totalTareas > 0
+                        ? `${Math.round(perfilIndividual.holdUser.total/perfilIndividual.finUser.totalTareas*100)}% en HOLD.`
+                        : 'Sin datos de HOLD.'}
+                      icon="⏸️" color="var(--red)" />
                   </div>
-                  {perfilIndividual.holdUser && (
-                    <div className="grid grid-4">
-                      <KPICard label="Días activos" value={perfilIndividual.finUser.diasHabiles}
-                        sub="Con al menos una tarea." icon="📅" color="var(--accent2)" />
-                      <KPICard label="Registros HOLD" value={formatNumber(perfilIndividual.holdUser.total)}
-                        sub={`${perfilIndividual.finUser.totalTareas>0?Math.round(perfilIndividual.holdUser.total/perfilIndividual.finUser.totalTareas*100):0}% de sus tareas pasaron por HOLD.`}
-                        icon="⏸️" color="var(--red)" />
-                    </div>
-                  )}
                 </>
               ) : (
                 <div className="card">
@@ -545,7 +592,31 @@ export function IndividualModule({ model, equipo, options, filteredHistorico, au
                 </div>
               )}
 
-              {/* Comparación vs contexto */}
+              {/* ── 2. Tareas por flujo ─────────────────────────────── */}
+              {perfilIndividual.finUser && Object.entries(perfilIndividual.finUser.byFlujo||{}).some(([,v])=>v>0) && (
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Tareas por flujo</div>
+                  </div>
+                  <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap' }}>
+                    {Object.entries(perfilIndividual.finUser.byFlujo).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).map(([flujo,val])=>(
+                      <div key={flujo} style={{ background:'var(--bg3)', border:'1px solid var(--border)',
+                        borderRadius:'var(--radius-sm)', padding:'0.5rem 0.85rem', minWidth:110 }}>
+                        <div style={{ fontSize:'0.7rem', color:'var(--text3)' }}>{flujo}</div>
+                        <div style={{ fontSize:'1.1rem', fontWeight:700, color:'var(--text)' }}>{formatNumber(val)}</div>
+                        <div style={{ fontSize:'0.68rem', color:'var(--text3)' }}>
+                          {perfilIndividual.finUser.totalTareas>0?Math.round(val/perfilIndividual.finUser.totalTareas*100):0}%
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── 3. Tendencia semanal — Tareas e IDs ─────────────── */}
+              <GraficoProdSemanal usuario={user1} filteredHistorico={filteredHistorico} />
+
+              {/* ── 4. Comparación con su contexto ──────────────────── */}
               {comparaciones && perfilIndividual.finUser && (
                 <div className="card">
                   <div className="card-header" style={{ marginBottom:'0.75rem' }}>
@@ -556,7 +627,7 @@ export function IndividualModule({ model, equipo, options, filteredHistorico, au
                     <table>
                       <thead>
                         <tr>
-                          <th >Métrica</th>
+                          <th>Métrica</th>
                           <th style={{ color:'var(--accent2)'}}>
                             {perfilIndividual.perfilEq?.nombre||user1}
                           </th>
@@ -612,7 +683,7 @@ export function IndividualModule({ model, equipo, options, filteredHistorico, au
                 </div>
               )}
 
-              {/* Calidad */}
+              {/* ── 5. Calidad auditada ─────────────────────────────── */}
               {perfilIndividual.audUser ? (
                 <div className="card">
                   <div className="card-header">
@@ -650,32 +721,8 @@ export function IndividualModule({ model, equipo, options, filteredHistorico, au
                 </div>
               )}
 
-              {/* Evolución semanal productiva */}
-              <GraficoProdSemanal usuario={user1} filteredHistorico={filteredHistorico} />
-
-              {/* Evolución semanal calidad */}
+              {/* ── 6. ¿El sistema mejora o empeora? ───────────────── */}
               <GraficoCalSemanal usuario={user1} auditados={auditados} />
-
-              {/* Distribución por flujo */}
-              {perfilIndividual.finUser && Object.entries(perfilIndividual.finUser.byFlujo||{}).some(([,v])=>v>0) && (
-                <div className="card">
-                  <div className="card-header">
-                    <div className="card-title">Tareas por flujo</div>
-                  </div>
-                  <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap' }}>
-                    {Object.entries(perfilIndividual.finUser.byFlujo).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).map(([flujo,val])=>(
-                      <div key={flujo} style={{ background:'var(--bg3)', border:'1px solid var(--border)',
-                        borderRadius:'var(--radius-sm)', padding:'0.5rem 0.85rem', minWidth:110 }}>
-                        <div style={{ fontSize:'0.7rem', color:'var(--text3)' }}>{flujo}</div>
-                        <div style={{ fontSize:'1.1rem', fontWeight:700, color:'var(--text)' }}>{formatNumber(val)}</div>
-                        <div style={{ fontSize:'0.68rem', color:'var(--text3)' }}>
-                          {perfilIndividual.finUser.totalTareas>0?Math.round(val/perfilIndividual.finUser.totalTareas*100):0}%
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </>
           )}
         </>

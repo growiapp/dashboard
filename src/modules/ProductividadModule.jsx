@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
@@ -15,16 +15,82 @@ const FLUJO_COLORS = {
   'Soporte':'#fb923c','Fallos':'#ef4444','Validación':'#22c55e',
 }
 
+function agruparPorDia(historico) {
+  const map = new Map()
+  for (const r of (historico || [])) {
+    if (!r.fechaKey) continue
+    if (!map.has(r.fechaKey)) map.set(r.fechaKey, { key: r.fechaKey, totalTareas: 0, totalIds: 0 })
+    const e = map.get(r.fechaKey)
+    e.totalTareas += 1
+    e.totalIds    += r.idsTC ?? 1
+  }
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key))
+}
+
+function agruparPorMes(historico) {
+  const map = new Map()
+  for (const r of (historico || [])) {
+    if (!r.fecha) continue
+    const mes = `${r.fecha.getFullYear()}-${String(r.fecha.getMonth() + 1).padStart(2, '0')}`
+    if (!map.has(mes)) map.set(mes, { key: mes, totalTareas: 0, totalIds: 0 })
+    const e = map.get(mes)
+    e.totalTareas += 1
+    e.totalIds    += r.idsTC ?? 1
+  }
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key))
+}
+
+function GranularidadToggle({ value, onChange, disabled }) {
+  const opts = [
+    { id: 'diario',  label: 'Diario' },
+    { id: 'semanal', label: 'Semanal' },
+    { id: 'mensual', label: 'Mensual' },
+  ]
+  return (
+    <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', overflow:'hidden' }}>
+      {opts.map(o => (
+        <button key={o.id}
+          onClick={() => onChange(o.id)}
+          style={{
+            padding:'0.25rem 0.75rem', fontSize:'0.72rem', fontWeight: value===o.id ? 700 : 400,
+            background: value===o.id ? 'var(--accent)' : 'transparent',
+            color: value===o.id ? '#fff' : 'var(--text2)',
+            border:'none', cursor:'pointer',
+            borderRight:'1px solid var(--border)',
+          }}
+        >{o.label}</button>
+      ))}
+    </div>
+  )
+}
+
+function tareasDiaColor(v) {
+  if (v == null) return 'var(--text)'
+  if (v >= 90) return 'var(--green)'
+  if (v >= 80) return 'var(--yellow)'
+  return 'var(--red)'
+}
+
 export function ProductividadModule({ model }) {
   const { prodModel } = model
   if (!prodModel) return <EmptyState message={COPY.empty} />
 
   const { kpis, semanas, ranking, top5, bottom5, complejidadFlujo, colabActivos, promDiasActivos, prevKpis } = prodModel
+  const histData = model.filteredHistorico || []
+
   const dTareas = delta(kpis.totalTareas,     prevKpis?.totalTareas)
   const dIds    = delta(kpis.totalIds,         prevKpis?.totalIds)
   const dDia    = delta(kpis.promTareasPorDia, prevKpis?.promTareasPorDia)
 
   const { sorted: rankingSorted, sortKey: rankSortKey, sortDir: rankSortDir, onSort: rankOnSort } = useTableSort(ranking, ranking)
+
+  const [granularidad, setGranularidad] = useState('semanal')
+
+  const tendenciaData = useMemo(() => {
+    if (granularidad === 'diario')  return agruparPorDia(histData)
+    if (granularidad === 'mensual') return agruparPorMes(histData)
+    return semanas.map(s => ({ ...s, key: s.week }))
+  }, [granularidad, histData, semanas])
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'1.25rem' }}>
@@ -33,24 +99,21 @@ export function ProductividadModule({ model }) {
         ℹ️ {COPY.modules.prodTareasVsIds}
       </div>
 
-      {/* ── CAPACIDAD ────────────────────────────────────────── */}
+      {/* ── CAPACIDAD + TAREAS en la misma fila ───────────────── */}
       <SectionLabel>Capacidad</SectionLabel>
       <div className="grid grid-4">
         <KPIv6 label={COPY.kpis.colaborActivos.label} value={colabActivos}
           help={COPY.kpis.colaborActivos.help} icon="👥" color="var(--accent)" />
         <KPIv6 label={COPY.kpis.diasActivos.label} value={`${promDiasActivos}d`}
           help={COPY.kpis.diasActivos.help} icon="📅" color="var(--accent2)" />
-      </div>
-
-      {/* ── TAREAS FINALIZADAS ───────────────────────────────── */}
-      <SectionLabel>Tareas</SectionLabel>
-      <div className="metric-note">Una tarea = un registro en el histórico operativo. Distinto de IDs.</div>
-      <div className="grid grid-4">
         <KPIv6 label={COPY.kpis.tareasFinalizadas.label} value={formatNumber(kpis.totalTareas)}
           help={COPY.kpis.tareasFinalizadas.help} icon="📦" color="var(--accent)" d={dTareas} />
         <KPIv6 label={COPY.kpis.prodPorDia.label} value={`${formatNumber(kpis.promTareasPorDia)} / día`}
           help={COPY.kpis.prodPorDia.help} icon="⚡" color="var(--green)" d={dDia} />
       </div>
+
+      <SectionLabel>Tareas</SectionLabel>
+      <div className="metric-note">Una tarea = un registro en el histórico operativo. Distinto de IDs.</div>
 
       {/* ── IDs TRABAJADOS ───────────────────────────────────── */}
       <SectionLabel>IDs trabajados</SectionLabel>
@@ -64,32 +127,36 @@ export function ProductividadModule({ model }) {
           help={COPY.kpis.relTareasIds.help} icon="🔄" color="var(--slate)" />
       </div>
 
-      {/* ── TENDENCIA SEMANAL ─────────────────────────────────── */}
-      {semanas.length > 0 && (
+      {/* ── TENDENCIA con toggle granularidad ─────────────────── */}
+      {tendenciaData.length > 0 && (
         <div className="card">
           <div className="card-header">
             <div>
-              <div className="card-title">Tendencia semanal — Tareas e IDs</div>
+              <div className="card-title">Tendencia — Tareas e IDs</div>
               <div className="card-subtitle">
                 Barras = tareas · Línea = IDs trabajados. Si divergen, la complejidad promedio cambió.
               </div>
             </div>
+            <GranularidadToggle value={granularidad} onChange={setGranularidad} />
           </div>
           <ResponsiveContainer width="100%" height={240}>
-            <ComposedChart data={semanas} margin={{ top:5, right:40, left:0, bottom:5 }}>
+            <ComposedChart data={tendenciaData} margin={{ top:5, right:40, left:0, bottom:5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="week" tick={{ fill:'var(--text3)', fontSize:11 }}
-                tickFormatter={v=>`Sem ${v}`} />
-              <YAxis yAxisId="left" tick={{ fill:'var(--text3)', fontSize:11 }}
-                tickFormatter={formatNumber} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fill:'var(--text3)', fontSize:11 }}
-                tickFormatter={formatNumber} />
-              <Tooltip content={<CustomTooltip labelFormatter={v=>`Semana ${v}`} valueFormatter={formatNumber} />} />
+              <XAxis dataKey="key"
+                tick={{ fill:'var(--text3)', fontSize:11 }}
+                tickFormatter={v => {
+                  if (granularidad === 'semanal') return `Sem ${v}`
+                  if (granularidad === 'diario')  return v?.slice(5) || v
+                  return v
+                }} />
+              <YAxis yAxisId="left" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={formatNumber} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={formatNumber} />
+              <Tooltip content={<CustomTooltip
+                labelFormatter={v => granularidad === 'semanal' ? `Semana ${v}` : v}
+                valueFormatter={formatNumber} />} />
               <Legend wrapperStyle={{ fontSize:'0.72rem', color:'var(--text3)' }} />
-              {/* Barras: tareas desde historico */}
               <Bar yAxisId="left" dataKey="totalTareas" name="Tareas"
                 fill="var(--accent)" radius={[3,3,0,0]} />
-              {/* Línea: IDs trabajados desde historico */}
               <Line yAxisId="right" type="monotone" dataKey="totalIds" name="IDs trabajados"
                 stroke="#fb923c" strokeWidth={2} dot={{ r:3 }} />
             </ComposedChart>
@@ -97,76 +164,77 @@ export function ProductividadModule({ model }) {
         </div>
       )}
 
-      {/* ── DISTRIBUCIÓN POR FLUJO (tareas) ─────────────────── */}
-      {kpis.byFlujo && (
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title">Distribución de tareas por flujo</div>
-            <div className="card-subtitle">Alta concentración en un solo flujo = riesgo operativo si ese flujo se traba.</div>
-          </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:'0.6rem' }}>
-            {Object.entries(kpis.byFlujo).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).map(([flujo,val]) => {
-              const max = Math.max(...Object.values(kpis.byFlujo))
-              return (
-                <div key={flujo}>
-                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.78rem', marginBottom:3 }}>
-                    <span style={{ color:'var(--text2)' }}>{flujo}</span>
-                    <span style={{ color:'var(--text)', fontWeight:600 }}>
-                      {formatNumber(val)} tareas
-                      <span style={{ color:'var(--text3)', fontWeight:400, marginLeft:4 }}>
-                        ({kpis.totalTareas>0?Math.round(val/kpis.totalTareas*100):0}%)
+      {/* ── DISTRIBUCIÓN POR FLUJO + COMPLEJIDAD en misma fila ─ */}
+      <div className="grid grid-2">
+        {kpis.byFlujo && (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Distribución de tareas por flujo</div>
+              <div className="card-subtitle">Alta concentración en un solo flujo = riesgo operativo si ese flujo se traba.</div>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'0.6rem' }}>
+              {Object.entries(kpis.byFlujo).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).map(([flujo,val]) => {
+                const max = Math.max(...Object.values(kpis.byFlujo))
+                return (
+                  <div key={flujo}>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.78rem', marginBottom:3 }}>
+                      <span style={{ color:'var(--text2)' }}>{flujo}</span>
+                      <span style={{ color:'var(--text)', fontWeight:600 }}>
+                        {formatNumber(val)} tareas
+                        <span style={{ color:'var(--text3)', fontWeight:400, marginLeft:4 }}>
+                          ({kpis.totalTareas>0?Math.round(val/kpis.totalTareas*100):0}%)
+                        </span>
                       </span>
-                    </span>
+                    </div>
+                    <div className="progress-bar">
+                      <div className="progress-fill"
+                        style={{ width:`${max>0?val/max*100:0}%`,
+                                 background: FLUJO_COLORS[flujo]||'var(--accent)' }} />
+                    </div>
                   </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill"
-                      style={{ width:`${max>0?val/max*100:0}%`,
-                               background: FLUJO_COLORS[flujo]||'var(--accent)' }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── COMPLEJIDAD POR FLUJO ─────────────────────────────── */}
-      {complejidadFlujo?.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <div className="card-title">Complejidad operativa por flujo</div>
-              <div className="card-subtitle">IDs por tarea en cada flujo. Más alto = cada tarea involucra más productos = mayor carga operativa.</div>
+                )
+              })}
             </div>
           </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:'0.6rem' }}>
-            {complejidadFlujo.map(f => {
-              const max = complejidadFlujo[0].relIdsPorTarea || 1
-              return (
-                <div key={f.flujo}>
-                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.78rem', marginBottom:3 }}>
-                    <span style={{ color:'var(--text2)' }}>{f.flujo}</span>
-                    <span style={{ color:'var(--text)', fontWeight:600 }}>
-                      {f.relIdsPorTarea}x IDs/tarea
-                      <span style={{ color:'var(--text3)', fontWeight:400, marginLeft:4 }}>
-                        ({formatNumber(f.totalTareas)} tareas)
+        )}
+
+        {complejidadFlujo?.length > 0 && (
+          <div className="card">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Complejidad operativa por flujo</div>
+                <div className="card-subtitle">IDs por tarea en cada flujo. Más alto = mayor carga operativa.</div>
+              </div>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'0.6rem' }}>
+              {complejidadFlujo.map(f => {
+                const max = complejidadFlujo[0].relIdsPorTarea || 1
+                return (
+                  <div key={f.flujo}>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.78rem', marginBottom:3 }}>
+                      <span style={{ color:'var(--text2)' }}>{f.flujo}</span>
+                      <span style={{ color:'var(--text)', fontWeight:600 }}>
+                        {f.relIdsPorTarea}x IDs/tarea
+                        <span style={{ color:'var(--text3)', fontWeight:400, marginLeft:4 }}>
+                          ({formatNumber(f.totalTareas)} tareas)
+                        </span>
                       </span>
-                    </span>
+                    </div>
+                    <div className="progress-bar">
+                      <div className="progress-fill"
+                        style={{ width:`${(f.relIdsPorTarea/max)*100}%`,
+                                 background: FLUJO_COLORS[f.flujo] || 'var(--accent)' }} />
+                    </div>
                   </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill"
-                      style={{ width:`${(f.relIdsPorTarea/max)*100}%`,
-                               background: FLUJO_COLORS[f.flujo] || 'var(--accent)' }} />
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
+            <div className="metric-note" style={{ marginTop:'0.5rem' }}>
+              IDs/tarea &gt; 1x significa que las tareas de ese flujo accionan múltiples productos en promedio.
+            </div>
           </div>
-          <div className="metric-note" style={{ marginTop:'0.5rem' }}>
-            IDs/tarea &gt; 1x significa que las tareas de ese flujo accionan múltiples productos en promedio.
-          </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── TOP 5 / BOTTOM 5 ─────────────────────────────────── */}
       {(top5?.length > 0 || bottom5?.length > 0) && (
@@ -203,17 +271,20 @@ export function ProductividadModule({ model }) {
                 </tr>
               </thead>
               <tbody>
-                {rankingSorted.map((r, i) => (
-                  <tr key={r.usuario}>
-                    <td style={{ color:'var(--text3)' }}>{i+1}</td>
-                    <td style={{ fontWeight:600 }}>{r.usuario}</td>
-                    <td>{formatNumber(r.totalTareas)}</td>
-                    <td style={{ color:'#38bdf8' }}>{formatNumber(r.totalIds)}</td>
-                    <td style={{ color:'var(--text3)' }}>{r.relIdsPorTarea}x</td>
-                    <td>{r.diasHabiles}</td>
-                    <td>{formatNumber(r.promTareasPorDia)}</td>
-                  </tr>
-                ))}
+                {rankingSorted.map((r, i) => {
+                  const tdColor = tareasDiaColor(r.promTareasPorDia)
+                  return (
+                    <tr key={r.usuario}>
+                      <td style={{ color:'var(--text3)' }}>{i+1}</td>
+                      <td style={{ fontWeight:600 }}>{r.usuario}</td>
+                      <td>{formatNumber(r.totalTareas)}</td>
+                      <td style={{ color:'#38bdf8' }}>{formatNumber(r.totalIds)}</td>
+                      <td style={{ color:'var(--text3)' }}>{r.relIdsPorTarea}x</td>
+                      <td>{r.diasHabiles}</td>
+                      <td style={{ fontWeight:700, color: tdColor }}>{formatNumber(r.promTareasPorDia)}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

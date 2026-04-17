@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Line } from 'recharts'
 import { formatNumber } from '../utils/parsers.js'
 import { COPY } from '../config/copy.js'
 import { THRESHOLDS } from '../config/thresholds.js'
@@ -63,6 +63,7 @@ export function FriccionModule({ model, holdSnapshot, holdLoadedAt, historicoCom
   if (!friccionModel) return <EmptyState message={COPY.empty} />
 
   const [subTab, setSubTab] = useState('historico')
+  const [granBloqueos, setGranBloqueos] = useState('semanal')
 
   // Fecha real del CSV desde GitHub (repo público)
   const { date: holdCsvDate } = useGitHubFileDate(
@@ -73,6 +74,42 @@ export function FriccionModule({ model, holdSnapshot, holdLoadedAt, historicoCom
 
   const holdRate = kpisHold && prodModel?.kpis?.totalTareas > 0
     ? Math.round(kpisHold.idsUnicos / prodModel.kpis.totalTareas * 100) : null
+
+  // Agrupaciones alternativas para gráfico de evolución de bloqueos
+  const bloqueosDiario = useMemo(() => {
+    const hist = historicoCompleto || model?.filteredHistorico || []
+    const map = new Map()
+    for (const r of hist) {
+      if (r.status !== 'HOLD' || !r.fechaKey) continue
+      if (!map.has(r.fechaKey)) map.set(r.fechaKey, { key: r.fechaKey, total: 0, setIds: new Set() })
+      const e = map.get(r.fechaKey)
+      e.total += 1
+      if (r.idLink) e.setIds.add(r.idLink)
+    }
+    return [...map.values()]
+      .map(e => ({ key: e.key, total: e.total, idsUnicos: e.setIds.size }))
+      .sort((a, b) => a.key.localeCompare(b.key))
+  }, [historicoCompleto, model?.filteredHistorico])
+
+  const bloqueosMensual = useMemo(() => {
+    const hist = historicoCompleto || model?.filteredHistorico || []
+    const map = new Map()
+    for (const r of hist) {
+      if (r.status !== 'HOLD' || !r.fecha) continue
+      const mes = `${r.fecha.getFullYear()}-${String(r.fecha.getMonth()+1).padStart(2,'0')}`
+      if (!map.has(mes)) map.set(mes, { key: mes, total: 0, setIds: new Set() })
+      const e = map.get(mes)
+      e.total += 1
+      if (r.idLink) e.setIds.add(r.idLink)
+    }
+    return [...map.values()]
+      .map(e => ({ key: e.key, total: e.total, idsUnicos: e.setIds.size }))
+      .sort((a, b) => a.key.localeCompare(b.key))
+  }, [historicoCompleto, model?.filteredHistorico])
+
+  const bloqueosData = granBloqueos === 'diario' ? bloqueosDiario
+    : granBloqueos === 'mensual' ? bloqueosMensual
+    : holdSem.map(s => ({ key: String(s.week), total: s.total, idsUnicos: s.idsUnicos }))
 
   const topIncidencias = Object.entries(kpisHold.byIncidencia || {}).sort((a,b)=>b[1]-a[1]).slice(0,10)
   const byFlujoData    = Object.entries(kpisHold.byFlujo || {}).map(([flujo,total])=>({flujo,total})).sort((a,b)=>b.total-a.total)
@@ -225,7 +262,6 @@ export function FriccionModule({ model, holdSnapshot, holdLoadedAt, historicoCom
                   { label: 'La mitad se resuelve en', val: diasATexto(leadTime.stats.p50), sub: '50% de los casos cerrados', color: leadTime.stats.p50 <= 3 ? 'var(--green)' : leadTime.stats.p50 <= 7 ? 'var(--yellow)' : 'var(--red)' },
                   { label: '3 de cada 4 resueltos en', val: diasATexto(leadTime.stats.p75), sub: '75% de los casos cerrados', color: leadTime.stats.p75 <= 7 ? 'var(--green)' : leadTime.stats.p75 <= 14 ? 'var(--yellow)' : 'var(--red)' },
                   { label: 'Tiempo promedio', val: diasATexto(leadTime.stats.promedio), sub: 'Puede estar inflado por casos extremos', color: 'var(--text3)' },
-                  { label: 'Caso más largo', val: leadTime.stats.max != null ? `${leadTime.stats.max} días` : '—', sub: 'El bloqueo que más tardó en cerrarse', color: leadTime.stats.max > 14 ? 'var(--red)' : 'var(--text3)' },
                 ].map(({ label, val, sub, color }) => (
                   <div key={label} style={{ background:'var(--bg3)', borderRadius:'var(--radius-sm)', padding:'0.6rem 0.85rem' }}>
                     <div style={{ fontSize:'0.68rem', color:'var(--text3)', marginBottom:2 }}>{label}</div>
@@ -237,21 +273,38 @@ export function FriccionModule({ model, holdSnapshot, holdLoadedAt, historicoCom
             </div>
           )}
 
-          {/* Evolución semanal */}
+          {/* Evolución de bloqueos con granularidad */}
           {holdSem.length > 0 && (
             <div className="card">
               <div className="card-header">
                 <div>
-                  <div className="card-title">Evolución semanal de bloqueos</div>
+                  <div className="card-title">Evolución de bloqueos</div>
                   <div className="card-subtitle">Si sube sostenidamente, hay dependencias sistémicas sin resolver.</div>
+                </div>
+                <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', overflow:'hidden' }}>
+                  {['diario','semanal','mensual'].map(g => (
+                    <button key={g}
+                      onClick={() => setGranBloqueos(g)}
+                      style={{
+                        padding:'0.25rem 0.7rem', fontSize:'0.72rem', fontWeight: granBloqueos===g ? 700 : 400,
+                        background: granBloqueos===g ? 'var(--accent)' : 'transparent',
+                        color: granBloqueos===g ? '#fff' : 'var(--text2)',
+                        border:'none', cursor:'pointer', borderRight:'1px solid var(--border)',
+                        textTransform:'capitalize',
+                      }}
+                    >{g.charAt(0).toUpperCase() + g.slice(1)}</button>
+                  ))}
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={holdSem} margin={{ top:5, right:10, left:0, bottom:5 }}>
+                <BarChart data={bloqueosData} margin={{ top:5, right:10, left:0, bottom:5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="week" tick={{ fill:'var(--text3)', fontSize:11 }} tickFormatter={v=>`Sem ${v}`} />
+                  <XAxis dataKey="key" tick={{ fill:'var(--text3)', fontSize:11 }}
+                    tickFormatter={v => granBloqueos === 'semanal' ? `Sem ${v}` : granBloqueos === 'diario' ? v?.slice(5)||v : v} />
                   <YAxis tick={{ fill:'var(--text3)', fontSize:11 }} />
-                  <Tooltip content={<CustomTooltip labelFormatter={v=>`Semana ${v}`} valueFormatter={formatNumber} />} />
+                  <Tooltip content={<CustomTooltip
+                    labelFormatter={v => granBloqueos === 'semanal' ? `Semana ${v}` : v}
+                    valueFormatter={formatNumber} />} />
                   <Bar dataKey="total" name="Registros HOLD" fill="#ef4444" radius={[3,3,0,0]} />
                   <Bar dataKey="idsUnicos" name="IDs únicos en HOLD" fill="#f97316" radius={[3,3,0,0]} />
                 </BarChart>

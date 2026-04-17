@@ -433,10 +433,7 @@ export function EquipoModule({ model, equipo, equipoError, navigateTo, setFilter
         </div>
       )}
 
-      {/* ── BLOQUE 5: Directorio ─────────────────────────────── */}
-      {equipo?.length > 0 && (
-        <DirectorioTable equipo={equipo} />
-      )}
+      {/* Directorio del equipo — oculto (no suma valor en vista operativa) */}
     </div>
   )
 }

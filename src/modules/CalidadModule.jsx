@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Cell, Legend } from 'recharts'
-import { calcCalidadKPIs, calidadPorSemana, calidadPorUsuario, calidadPorAuditor, calidadPorDominio, calidadPorError, concentracionDesvios } from '../utils/metrics/calidadMetrics.js'
+import { calcCalidadKPIs, calcPorCaso, calidadPorSemana, calidadPorUsuario, calidadPorAuditor, calidadPorDominio, calidadPorError, concentracionDesvios } from '../utils/metrics/calidadMetrics.js'
 import { CALIDAD_LABELS, CALIDAD_COLORS } from '../utils/normalizers.js'
 import { formatNumber } from '../utils/parsers.js'
 import { COPY } from '../config/copy.js'
@@ -9,12 +9,219 @@ import { EmptyState, CustomTooltip, ExportCSVButton, CalidadBar, KPICard } from 
 import { useTableSort, SortTh } from '../hooks/useTableSort.jsx'
 import { formatCalidadColab, formatCalidadError, formatCalidadAuditor } from '../utils/exportUtils.js'
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function PctCell({ val, total, type }) {
   const pct = total > 0 ? Math.round(val/total*100) : 0
   const color = type==='correcto'?'var(--green)':type==='desvio_grave'?'var(--red)':type==='desvio_leve'?'var(--yellow)':'var(--slate)'
   return <span style={{ color, fontWeight:600 }}>{val} <span style={{ color:'var(--text3)', fontWeight:400 }}>({pct}%)</span></span>
 }
 
+function exportCSV(rows, filename) {
+  if (!rows?.length) return
+  const keys = Object.keys(rows[0])
+  const header = keys.join(',')
+  const body = rows.map(r => keys.map(k => {
+    const v = r[k] ?? ''
+    return typeof v === 'string' && v.includes(',') ? `"${v}"` : v
+  }).join(',')).join('\n')
+  const blob = new Blob([header + '\n' + body], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ── Tabla inline de casos auditados ───────────────────────────────────────────
+function TablaCasosInline({ rows, titulo, onClose }) {
+  if (!rows?.length) return (
+    <div style={{ padding:'0.75rem', fontSize:'0.8rem', color:'var(--text3)' }}>Sin casos para mostrar.</div>
+  )
+  const csvRows = rows.map(r => ({
+    id_caso: r.idCaso || r.sugerenciaId || '—',
+    usuario: r.usuario || '—',
+    auditor: r.auditor || '—',
+    dominio: r.dominio || '—',
+    calidad: r.calidad || '—',
+    semana: r.week || '—',
+  }))
+  return (
+    <div style={{ marginTop:'0.75rem', borderTop:'1px solid var(--border)', paddingTop:'0.75rem' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.5rem' }}>
+        <span style={{ fontSize:'0.78rem', fontWeight:600, color:'var(--text2)' }}>{titulo} — {rows.length} registros</span>
+        <div style={{ display:'flex', gap:'0.5rem' }}>
+          <button onClick={() => exportCSV(csvRows, 'detalle_calidad.csv')}
+            style={{ fontSize:'0.72rem', padding:'0.2rem 0.6rem', background:'var(--bg3)', border:'1px solid var(--border)',
+              borderRadius:'var(--radius-sm)', color:'var(--text2)', cursor:'pointer' }}>
+            ⬇ Exportar CSV
+          </button>
+          <button onClick={onClose}
+            style={{ fontSize:'0.72rem', padding:'0.2rem 0.6rem', background:'transparent', border:'1px solid var(--border)',
+              borderRadius:'var(--radius-sm)', color:'var(--text3)', cursor:'pointer' }}>
+            ✕ Cerrar
+          </button>
+        </div>
+      </div>
+      <div className="table-wrap" style={{ maxHeight:320, overflowY:'auto' }}>
+        <table>
+          <thead>
+            <tr>
+              <th>ID Caso</th>
+              <th>Usuario</th>
+              <th>Auditor</th>
+              <th>Dominio</th>
+              <th>Calidad</th>
+              <th>Semana</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td style={{ fontFamily:'monospace', fontSize:'0.75rem' }}>{r.idCaso || r.sugerenciaId || '—'}</td>
+                <td>{r.usuario || '—'}</td>
+                <td style={{ color:'var(--text3)' }}>{r.auditor || '—'}</td>
+                <td style={{ color:'var(--text3)' }}>{r.dominio || '—'}</td>
+                <td><span style={{ color: CALIDAD_COLORS[r.calidad], fontWeight:600 }}>{CALIDAD_LABELS[r.calidad] || r.calidad}</span></td>
+                <td style={{ color:'var(--text3)' }}>{r.week ? `Sem ${r.week}` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Cards de distribución clicables ──────────────────────────────────────────
+function DistribCard({ cat, val, total, auditadosActivos, esPorCaso, casosData }) {
+  const [open, setOpen] = useState(false)
+
+  const filas = useMemo(() => {
+    if (!open) return []
+    if (esPorCaso) {
+      return (casosData || []).filter(c => c.calidad === cat)
+    }
+    return auditadosActivos.filter(r => r.calidad === cat)
+  }, [open, cat, auditadosActivos, esPorCaso, casosData])
+
+  return (
+    <div style={{ background:'var(--bg3)', border:`1px solid ${CALIDAD_COLORS[cat]}40`,
+      borderLeft:`3px solid ${CALIDAD_COLORS[cat]}`, borderRadius:'var(--radius-sm)',
+      padding:'0.5rem 0.85rem', minWidth:130, cursor:'pointer', transition:'box-shadow 0.15s',
+      boxShadow: open ? `0 0 0 2px ${CALIDAD_COLORS[cat]}60` : 'none',
+    }}
+      onClick={() => setOpen(o => !o)}
+    >
+      <div style={{ fontSize:'0.7rem', color:'var(--text3)', marginBottom:'0.1rem' }}>{CALIDAD_LABELS[cat]}</div>
+      <div style={{ fontSize:'1.2rem', fontWeight:700, color:CALIDAD_COLORS[cat] }}>{formatNumber(val)}</div>
+      <div style={{ fontSize:'0.7rem', color:'var(--text3)' }}>{total>0?Math.round(val/total*100):0}%</div>
+      <div style={{ fontSize:'0.65rem', color: open ? CALIDAD_COLORS[cat] : 'var(--text3)', marginTop:3 }}>
+        {open ? '▲ Ocultar detalle' : '▼ Ver casos'}
+      </div>
+      {open && (
+        <TablaCasosInline
+          rows={filas}
+          titulo={CALIDAD_LABELS[cat]}
+          onClose={e => { e.stopPropagation(); setOpen(false) }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Acciones sugeridas con detalle expandible ─────────────────────────────────
+function AccionItem({ accion, auditadosActivos, porDominio, porUsuario, navigateTo }) {
+  const [open, setOpen] = useState(false)
+
+  // Determinar qué datos mostrar al expandir
+  const filas = useMemo(() => {
+    if (!open) return []
+    // Si la acción menciona un dominio concreto, filtrar por ese dominio
+    const matchDominio = accion.match(/["""]([^"""]+)["""]\s*(?:tiene|—)/)
+    if (matchDominio) {
+      const dom = matchDominio[1]
+      return auditadosActivos.filter(r => r.dominio === dom)
+    }
+    // Si menciona colaboradores con efectividad baja
+    if (accion.includes('colaborador')) {
+      const bajos = (porUsuario || []).filter(u => u.efectividadSug < 0.8 && u.totalSugs >= 5)
+        .map(u => u.usuario)
+      return auditadosActivos.filter(r => bajos.includes(r.usuario))
+    }
+    return []
+  }, [open, accion, auditadosActivos, porUsuario])
+
+  const csvRows = filas.map(r => ({
+    id_caso: r.idCaso || '—',
+    sugerencia_id: r.sugerenciaId || '—',
+    usuario: r.usuario || '—',
+    auditor: r.auditor || '—',
+    dominio: r.dominio || '—',
+    calidad: r.calidad || '—',
+    semana: r.week || '—',
+  }))
+
+  const tieneDetalle = filas.length > 0 || !open
+
+  return (
+    <li style={{ fontSize:'0.82rem', color:'var(--text2)', borderLeft:'2px solid var(--border2)',
+      lineHeight:1.5, borderRadius:'0 var(--radius-sm) var(--radius-sm) 0',
+      background: open ? 'var(--bg3)' : 'transparent', transition:'background 0.15s',
+    }}>
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'0.75rem', padding:'0.5rem 0.75rem' }}>
+        <span style={{ flex:1 }}>{accion}</span>
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{ flexShrink:0, fontSize:'0.72rem', padding:'0.2rem 0.65rem',
+            background: open ? 'var(--accent)' : 'var(--bg3)',
+            color: open ? '#fff' : 'var(--text2)',
+            border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', cursor:'pointer',
+            whiteSpace:'nowrap',
+          }}>
+          {open ? '▲ Cerrar' : 'Ir →'}
+        </button>
+      </div>
+      {open && (
+        <div style={{ padding:'0 0.75rem 0.75rem' }}>
+          {filas.length > 0 ? (
+            <>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.5rem' }}>
+                <span style={{ fontSize:'0.75rem', color:'var(--text3)' }}>{filas.length} casos auditados en el período</span>
+                <button onClick={() => exportCSV(csvRows, 'accion_detalle.csv')}
+                  style={{ fontSize:'0.72rem', padding:'0.2rem 0.6rem', background:'var(--bg3)', border:'1px solid var(--border)',
+                    borderRadius:'var(--radius-sm)', color:'var(--text2)', cursor:'pointer' }}>
+                  ⬇ Exportar CSV
+                </button>
+              </div>
+              <div className="table-wrap" style={{ maxHeight:300, overflowY:'auto' }}>
+                <table>
+                  <thead>
+                    <tr><th>ID Caso</th><th>Usuario</th><th>Dominio</th><th>Calidad</th><th>Sem.</th></tr>
+                  </thead>
+                  <tbody>
+                    {filas.map((r, i) => (
+                      <tr key={i}>
+                        <td style={{ fontFamily:'monospace', fontSize:'0.75rem' }}>{r.idCaso || '—'}</td>
+                        <td>{r.usuario || '—'}</td>
+                        <td style={{ color:'var(--text3)' }}>{r.dominio || '—'}</td>
+                        <td><span style={{ color:CALIDAD_COLORS[r.calidad], fontWeight:600 }}>{CALIDAD_LABELS[r.calidad] || r.calidad}</span></td>
+                        <td style={{ color:'var(--text3)' }}>{r.week ? `S${r.week}` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize:'0.78rem', color:'var(--text3)', fontStyle:'italic' }}>
+              No se pudo determinar un conjunto de casos específico para esta acción. Revisá el tab correspondiente.
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  )
+}
+
+// ── Componentes de fuente ──────────────────────────────────────────────────────
 function FuenteStatus({ label, available, active, count }) {
   const color = available ? (label === 'SdC' ? 'var(--green)' : 'var(--accent2)') : 'var(--border2)'
   const bg    = available ? (label === 'SdC' ? 'rgba(34,197,94,0.06)' : 'rgba(99,102,241,0.06)') : 'var(--bg3)'
@@ -29,12 +236,11 @@ function FuenteStatus({ label, available, active, count }) {
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
         <span style={{ fontSize:'0.8rem', fontWeight:700, color: available ? color : 'var(--text3)' }}>{label}</span>
-        <span style={{ fontSize:'0.72rem', color: available ? 'var(--text3)' : 'var(--text3)', fontWeight: available ? 400 : 600 }}>
+        <span style={{ fontSize:'0.72rem', color:'var(--text3)', fontWeight: available ? 400 : 600 }}>
           {available ? 'disponible' : 'sin datos en este período'}
         </span>
         {active && available && (
-          <span style={{
-            fontSize:'0.65rem', fontWeight:700, color:'#fff',
+          <span style={{ fontSize:'0.65rem', fontWeight:700, color:'#fff',
             background: label === 'SdC' ? 'var(--green)' : 'var(--accent2)',
             padding:'2px 7px', borderRadius:99, textTransform:'uppercase', letterSpacing:'0.04em',
           }}>viendo</span>
@@ -74,6 +280,7 @@ function FuenteToggle({ value, onChange, hasMao }) {
   )
 }
 
+// ── MÓDULO PRINCIPAL ──────────────────────────────────────────────────────────
 export function CalidadModule({ model, auditados, auditadosMao }) {
   const { calidadModel } = model
   const [fuente, setFuente] = useState('sdc')
@@ -83,15 +290,9 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
   const hasMao = (auditadosMao?.length || 0) > 0
 
   useEffect(() => {
-    if (fuente === 'sdc' && !hasSdc && hasMao) {
-      setFuente('mao')
-      setAutoSwitched(true)
-    } else if (fuente === 'mao' && !hasMao && hasSdc) {
-      setFuente('sdc')
-      setAutoSwitched(true)
-    } else {
-      setAutoSwitched(false)
-    }
+    if (fuente === 'sdc' && !hasSdc && hasMao) { setFuente('mao'); setAutoSwitched(true) }
+    else if (fuente === 'mao' && !hasMao && hasSdc) { setFuente('sdc'); setAutoSwitched(true) }
+    else setAutoSwitched(false)
   }, [hasSdc, hasMao, fuente])
 
   const auditadosActivos = useMemo(() => {
@@ -101,6 +302,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
   }, [fuente, auditados, auditadosMao])
 
   const kpis          = useMemo(() => calcCalidadKPIs(auditadosActivos), [auditadosActivos])
+  const casosData     = useMemo(() => calcPorCaso(auditadosActivos), [auditadosActivos])
   const porUsuario    = useMemo(() => calidadPorUsuario(auditadosActivos), [auditadosActivos])
   const porAuditor_   = useMemo(() => calidadPorAuditor(auditadosActivos), [auditadosActivos])
   const porDominio    = useMemo(() => calidadPorDominio(auditadosActivos), [auditadosActivos])
@@ -112,7 +314,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
   const { sorted: auditorSorted, sortKey: audSortKey, sortDir: audSortDir, onSort: audOnSort } = useTableSort(porAuditor_ || [], porAuditor_ || [])
   const { sorted: usuarioSorted, sortKey: usuSortKey, sortDir: usuSortDir, onSort: usuOnSort } = useTableSort(porUsuario || [], porUsuario || [])
 
-    const acciones = useMemo(() => {
+  const acciones = useMemo(() => {
     const a = []
     if (!kpis) return ['Sin datos para generar acciones.']
     if (kpis.efectividadSug < THRESHOLDS.calidad.efectividadSug.warn) {
@@ -139,54 +341,44 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
     </div>
   )
 
-  if (!auditadosActivos?.length) return <EmptyState message={fuente === 'mao' ? 'No hay datos MAO para este corte. Cambiá la fuente o el período.' : 'No hay datos SdC para este corte. Cambiá la fuente o el período.'} />
+  if (!auditadosActivos?.length) return <EmptyState message={fuente === 'mao' ? 'No hay datos MAO para este corte.' : 'No hay datos SdC para este corte.'} />
   if (!kpis) return <EmptyState message={COPY.empty} />
-
-    const prevKpis = fuente === 'sdc' ? calidadModel?.prevKpis : null
 
   const efPct     = Math.round(kpis.efectividadSug * 100)
   const efCasoPct = Math.round(kpis.efectividadCaso * 100)
   const efColor   = efPct>=90?'var(--green)':efPct>=80?'var(--yellow)':'var(--red)'
   const gapPp     = Math.abs(efPct - efCasoPct)
 
-  // Vocabulario dinámico según fuente
   const vocab = fuente === 'sdc' ? {
-    unidad:         'sugerencia',
-    unidades:       'sugerencias',
-    unidadCap:      'Sugerencia',
-    labelPrincipal: 'Sugerencias correctas',
-    labelGraves:    'Errores graves',
-    subGraves:      (pct) => `${pct}% del total. Requieren acción inmediata.`,
-    mostrarCasos:   true,
-    mostrarComposicion: true,
-    labelDistribucion: 'Distribución — por sugerencia_id',
-    subDistribucion: 'Muestra dónde se concentra el error. Por sugerencia_id (métrica principal).',
-    colHeader:      'Sugs',
+    unidad:'sugerencia', unidades:'sugerencias', unidadCap:'Sugerencia',
+    labelPrincipal:'Sugerencias correctas', labelGraves:'Errores graves',
+    subGraves:(pct) => `${pct}% del total. Requieren acción inmediata.`,
+    mostrarCasos:true, mostrarComposicion:true,
+    labelDistribucion:'Distribución — por sugerencia_id',
+    labelDistribucionCaso:'Distribución — por Caso (id_caso)',
+    subDistribucion:'Muestra dónde se concentra el error. Por sugerencia_id (métrica principal).',
+    subDistribucionCaso:'Misma lectura pero agrupando todas las sugerencias de un caso. Si el caso tiene al menos un desvío, se cuenta como desviado.',
+    colHeader:'Sugs',
   } : fuente === 'mao' ? {
-    unidad:         'acción',
-    unidades:       'acciones',
-    unidadCap:      'Acción',
-    labelPrincipal: 'Acciones correctas',
-    labelGraves:    'Acciones con error grave',
-    subGraves:      (pct) => `${pct}% del total. Requieren revisión inmediata.`,
-    mostrarCasos:   false,
-    mostrarComposicion: false,
-    labelDistribucion: 'Distribución — por acción auditada',
-    subDistribucion: 'Muestra dónde se concentra el error en las acciones MAO.',
-    colHeader:      'Acc.',
+    unidad:'acción', unidades:'acciones', unidadCap:'Acción',
+    labelPrincipal:'Acciones correctas', labelGraves:'Acciones con error grave',
+    subGraves:(pct) => `${pct}% del total. Requieren revisión inmediata.`,
+    mostrarCasos:false, mostrarComposicion:false,
+    labelDistribucion:'Distribución — por acción auditada',
+    labelDistribucionCaso:null,
+    subDistribucion:'Muestra dónde se concentra el error en las acciones MAO.',
+    subDistribucionCaso:null,
+    colHeader:'Acc.',
   } : {
-    // Combinado
-    unidad:         'registro',
-    unidades:       'registros',
-    unidadCap:      'Registro',
-    labelPrincipal: 'Registros correctos',
-    labelGraves:    'Errores graves',
-    subGraves:      (pct) => `${pct}% del total combinado (SdC + MAO).`,
-    mostrarCasos:   false,
-    mostrarComposicion: false,
-    labelDistribucion: 'Distribución — SdC + MAO combinado',
-    subDistribucion: 'Vista unificada de ambas fuentes de auditoría.',
-    colHeader:      'Reg.',
+    unidad:'registro', unidades:'registros', unidadCap:'Registro',
+    labelPrincipal:'Registros correctos', labelGraves:'Errores graves',
+    subGraves:(pct) => `${pct}% del total combinado (SdC + MAO).`,
+    mostrarCasos:false, mostrarComposicion:false,
+    labelDistribucion:'Distribución — SdC + MAO combinado',
+    labelDistribucionCaso:null,
+    subDistribucion:'Vista unificada de ambas fuentes de auditoría.',
+    subDistribucionCaso:null,
+    colHeader:'Reg.',
   }
 
   return (
@@ -205,27 +397,14 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
 
       {/* ── Disponibilidad de fuentes ── */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.5rem' }}>
-        <FuenteStatus
-          label="SdC"
-          available={hasSdc}
-          active={fuente === 'sdc' || fuente === 'combinado'}
-          count={auditados?.length || 0}
-        />
-        <FuenteStatus
-          label="MAO"
-          available={hasMao}
-          active={fuente === 'mao' || fuente === 'combinado'}
-          count={auditadosMao?.length || 0}
-        />
+        <FuenteStatus label="SdC" available={hasSdc} active={fuente==='sdc'||fuente==='combinado'} count={auditados?.length||0} />
+        <FuenteStatus label="MAO" available={hasMao} active={fuente==='mao'||fuente==='combinado'} count={auditadosMao?.length||0} />
       </div>
 
       {autoSwitched && (
-        <div style={{
-          display:'flex', alignItems:'flex-start', gap:'0.6rem',
-          padding:'0.6rem 0.85rem',
+        <div style={{ display:'flex', alignItems:'flex-start', gap:'0.6rem', padding:'0.6rem 0.85rem',
           background:'rgba(251,146,60,0.08)', border:'1px solid rgba(251,146,60,0.3)',
-          borderRadius:'var(--radius-sm)', fontSize:'0.78rem', color:'#fb923c',
-        }}>
+          borderRadius:'var(--radius-sm)', fontSize:'0.78rem', color:'#fb923c' }}>
           <span style={{ fontWeight:700, flexShrink:0, marginTop:1 }}>↻</span>
           <span>
             <strong>Mostrando {fuente === 'mao' ? 'MAO' : 'SdC'}</strong> — no hay datos de {fuente === 'mao' ? 'SdC' : 'MAO'} en este período.
@@ -233,13 +412,11 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
           </span>
         </div>
       )}
-      <div className="metric-note">
-        📊 {COPY.modules.calidadPrincipal}
-      </div>
+      <div className="metric-note">📊 {COPY.modules.calidadPrincipal}</div>
 
-      {/* Estado general */}
+      {/* ── Estado general ── */}
       <div className="grid grid-4">
-        <div className="card" style={{ gridColumn: 'span 1' }}>
+        <div className="card" style={{ gridColumn:'span 1' }}>
           <div className="card-header" style={{ marginBottom:'0.4rem' }}>
             <span className="card-title" title={COPY.kpis.efSug.help}>{vocab.labelPrincipal} ⓘ</span>
             <span className="badge badge-accent">Principal</span>
@@ -272,7 +449,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
             <div className="card-header" style={{ marginBottom:'0.5rem' }}>
               <span className="card-title">Composición de muestra</span>
             </div>
-            <div style={{ fontSize:'0.72rem', color:'var(--text3)', marginBottom:'0.3rem' }}>Define cómo se interpreta la calidad. Si cambia, la lectura cambia.</div>
+            <div style={{ fontSize:'0.72rem', color:'var(--text3)', marginBottom:'0.3rem' }}>Define cómo se interpreta la calidad.</div>
             <div style={{ fontSize:'0.82rem', display:'flex', flexDirection:'column', gap:'0.25rem' }}>
               {[
                 ['Sugerencias', formatNumber(kpis.totalSugs)],
@@ -288,30 +465,56 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
         )}
       </div>
 
-      {/* Distribución */}
+      {/* ── Distribución por sugerencia_id — cards clicables ── */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">{vocab.labelDistribucion}</div>
-          <div className="card-subtitle">{vocab.subDistribucion}</div>
+          <div className="card-subtitle">{vocab.subDistribucion} · Hacé click en una card para ver los casos.</div>
         </div>
         <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap' }}>
           {Object.entries(kpis.bySug||{}).filter(([,v])=>v>0).map(([cat,val])=>(
-            <div key={cat} style={{ background:'var(--bg3)', border:`1px solid ${CALIDAD_COLORS[cat]}40`, borderLeft:`3px solid ${CALIDAD_COLORS[cat]}`, borderRadius:'var(--radius-sm)', padding:'0.5rem 0.85rem', minWidth:130 }}>
-              <div style={{ fontSize:'0.7rem', color:'var(--text3)', marginBottom:'0.1rem' }}>{CALIDAD_LABELS[cat]}</div>
-              <div style={{ fontSize:'1.2rem', fontWeight:700, color:CALIDAD_COLORS[cat] }}>{formatNumber(val)}</div>
-              <div style={{ fontSize:'0.7rem', color:'var(--text3)' }}>{kpis.totalSugs>0?Math.round(val/kpis.totalSugs*100):0}%</div>
-            </div>
+            <DistribCard
+              key={cat}
+              cat={cat}
+              val={val}
+              total={kpis.totalSugs}
+              auditadosActivos={auditadosActivos}
+              esPorCaso={false}
+            />
           ))}
         </div>
       </div>
 
-      {/* Concentración de errores */}
+      {/* ── Distribución por id_caso — cards clicables (solo SdC) ── */}
+      {vocab.mostrarCasos && kpis.byCaso && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">{vocab.labelDistribucionCaso}</div>
+            <div className="card-subtitle">{vocab.subDistribucionCaso} · Hacé click en una card para ver los casos.</div>
+          </div>
+          <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap' }}>
+            {Object.entries(kpis.byCaso||{}).filter(([,v])=>v>0).map(([cat,val])=>(
+              <DistribCard
+                key={cat}
+                cat={cat}
+                val={val}
+                total={kpis.totalCasos}
+                auditadosActivos={auditadosActivos}
+                esPorCaso={true}
+                casosData={casosData}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Concentración de errores ── */}
       {concentracion && (
         <div className="card">
           <div className="card-header">
             <div>
               <div className="card-title">Concentración de errores</div>
-              <div className="card-subtitle">Define si el problema es focalizado o sistémico. Si los top 3 explican más del 60% de los desvíos, la acción es clara.</div>
+              <div className="card-subtitle">Define si el problema es focalizado o sistémico.</div>
             </div>
             <ExportCSVButton data={formatCalidadError(concentracion?.porError)} filename="calidad_por_error.csv" />
           </div>
@@ -338,12 +541,12 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
         </div>
       )}
 
-      {/* Evolución con target */}
+      {/* ── Evolución con target ── */}
       {porSemana.length > 0 && (
         <div className="card">
           <div className="card-header">
             <div className="card-title">¿El sistema mejora o empeora?</div>
-            <div className="card-subtitle">Línea roja = target 90%. Si un patrón crece sostenidamente, ya es riesgo aunque no sea lo más grande.</div>
+            <div className="card-subtitle">Línea roja = target 90%. Si un patrón crece sostenidamente, ya es riesgo.</div>
           </div>
           <ResponsiveContainer width="100%" height={210}>
             <LineChart data={porSemana} margin={{ top:5, right:10, left:0, bottom:5 }}>
@@ -353,7 +556,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
               <Tooltip content={<CustomTooltip valueFormatter={v=>`${Math.round(v*100)}%`} labelFormatter={v=>`Semana ${v}`} />} />
               <Legend wrapperStyle={{ fontSize:'0.75rem', color:'var(--text3)' }} />
               <Line type="monotone" dataKey={()=>0.9} name="Target 90%" stroke="var(--red)" strokeWidth={1} strokeDasharray="4 2" dot={false} legendType="none" />
-              <Line type="monotone" dataKey="efectividadSug" name={fuente === 'sdc' ? 'Por sugerencia_id (principal)' : fuente === 'mao' ? 'Acciones correctas' : 'Registros correctos'} stroke="var(--green)" strokeWidth={2} dot={{ r:3 }} />
+              <Line type="monotone" dataKey="efectividadSug" name={fuente==='sdc'?'Por sugerencia_id (principal)':fuente==='mao'?'Acciones correctas':'Registros correctos'} stroke="var(--green)" strokeWidth={2} dot={{ r:3 }} />
               {vocab.mostrarCasos && (
                 <Line type="monotone" dataKey="efectividadCaso" name="Por id_caso (contextual)" stroke="var(--accent2)" strokeWidth={2} strokeDasharray="5 3" dot={{ r:3 }} />
               )}
@@ -372,7 +575,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
               <BarChart data={porDominio.slice(0,10)} layout="vertical" margin={{ top:0, right:10, left:0, bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                 <XAxis type="number" tick={{ fill:'var(--text3)', fontSize:10 }} tickFormatter={v=>`${Math.round(v*100)}%`} domain={[0,1]} />
-                <YAxis type="category" dataKey="dominio" tick={{ fill:'var(--text3)', fontSize:10 }} width={Math.min(220, Math.max(100, (porDominio.slice(0,10).reduce((max, e) => Math.max(max, (e.dominio||'').length), 0) * 6.5)))} />
+                <YAxis type="category" dataKey="dominio" tick={{ fill:'var(--text3)', fontSize:10 }} width={Math.min(220, Math.max(100, (porDominio.slice(0,10).reduce((max,e)=>Math.max(max,(e.dominio||'').length),0)*6.5)))} />
                 <Tooltip content={<CustomTooltip valueFormatter={v=>`${Math.round(v*100)}%`} />} />
                 <Bar dataKey="efectividad" name="Efectividad" radius={[0,3,3,0]}>
                   {porDominio.slice(0,10).map((e,i)=>(
@@ -389,7 +592,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
             <div className="card-header" style={{ marginBottom:'0.5rem' }}>
               <div>
                 <div className="card-title">Por auditor</div>
-                <div className="card-subtitle">Volumen y resultados por auditor. El volumen afecta la representatividad.</div>
+                <div className="card-subtitle">Volumen y resultados por auditor.</div>
               </div>
               <ExportCSVButton data={formatCalidadAuditor(porAuditor_)} filename="calidad_por_auditor.csv" />
             </div>
@@ -419,13 +622,13 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
         )}
       </div>
 
-      {/* Por colaborador */}
+      {/* ── Por colaborador ── */}
       {porUsuario?.length > 0 && (
         <div className="card">
           <div className="card-header">
             <div>
               <div className="card-title">Calidad por colaborador</div>
-              <div className="card-subtitle">{fuente === 'sdc' ? 'Principal: por sugerencia_id · Contextual: por id_caso (columnas grises)' : fuente === 'mao' ? 'Efectividad por acción auditada' : 'Efectividad combinada SdC + MAO'}</div>
+              <div className="card-subtitle">{fuente==='sdc'?'Principal: por sugerencia_id · Contextual: por id_caso':fuente==='mao'?'Efectividad por acción auditada':'Efectividad combinada SdC + MAO'}</div>
             </div>
             <ExportCSVButton data={formatCalidadColab(porUsuario)} filename="calidad_por_colaborador.csv" />
           </div>
@@ -462,15 +665,21 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
         </div>
       )}
 
-      {/* Acciones */}
+      {/* ── Acciones sugeridas — con tabla de detalle inline ── */}
       <div className="card">
         <div className="card-header" style={{ marginBottom:'0.75rem' }}>
           <div className="card-title">Acciones sugeridas</div>
-          <span className="badge badge-slate" style={{ fontSize:'0.65rem' }}>Si no dispara una revisión concreta, el análisis quedó incompleto.</span>
+          <span className="badge badge-slate" style={{ fontSize:'0.65rem' }}>Hacé click en "Ir →" para ver el detalle de casos.</span>
         </div>
         <ul style={{ listStyle:'none', display:'flex', flexDirection:'column', gap:'0.5rem' }}>
           {acciones.map((a,i)=>(
-            <li key={i} style={{ fontSize:'0.82rem', color:'var(--text2)', padding:'0.5rem 0.75rem', borderLeft:'2px solid var(--border2)', lineHeight:1.5 }}>{a}</li>
+            <AccionItem
+              key={i}
+              accion={a}
+              auditadosActivos={auditadosActivos}
+              porDominio={porDominio}
+              porUsuario={porUsuario}
+            />
           ))}
         </ul>
       </div>

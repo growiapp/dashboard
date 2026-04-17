@@ -108,10 +108,16 @@ export function generarInsights({ kpisProd, kpisCalidad, kpisHold, snapshot, lea
   if (semanas?.length >= 2) {
     const last = semanas[semanas.length - 1]
     const prev = semanas[semanas.length - 2]
-    // Excluir la semana más reciente si tiene menos de 4 días con actividad —
-    // probablemente es la semana en curso con datos incompletos, no una caída real.
     const semanaCompleta = (last.diasHabiles ?? 0) >= 4
-    if (semanaCompleta) {
+    if (!semanaCompleta) {
+      // Semana en curso con datos parciales — no comparar con la semana anterior
+      ins.push({ severity: SEV.CONTEXTO,
+        title: `Semana ${last.week} — dato parcial`,
+        message: `La semana ${last.week} aún está en curso (${last.diasHabiles ?? 0} día${last.diasHabiles === 1 ? '' : 's'} con actividad). El total de tareas va a ser menor al esperado.`,
+        whyItMatters: 'Comparar contra una semana incompleta puede generar falsas alarmas de caída de productividad.',
+        action: 'Esperá al cierre de la semana para evaluar el resultado real.',
+        module: 'productividad' })
+    } else {
       const dSem = d(last.totalTareas, prev.totalTareas)
       if (dSem != null && dSem < -THRESHOLDS.productividad.caida.warn) {
         ins.push({ severity: SEV.ATENCION,
