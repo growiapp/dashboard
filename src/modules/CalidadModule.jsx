@@ -269,7 +269,7 @@ function AccionItem({ accion, auditadosActivos, porUsuario, fuente }) {
 
   const filas = useMemo(() => {
     if (!open) return []
-    const matchDominio = accion.match(/[“”""]([^“”""]+)[“”""]\s*(?:tiene|—)/)
+    const matchDominio = accion.match(/["""\u201c\u201d]([^"""\u201c\u201d]+)["""\u201c\u201d]\s*(?:tiene|\u2014)/)
     if (matchDominio) {
       const dom = matchDominio[1]
       return auditadosActivos.filter(r => r.dominio === dom)
@@ -280,6 +280,14 @@ function AccionItem({ accion, auditadosActivos, porUsuario, fuente }) {
     }
     return []
   }, [open, accion, auditadosActivos, porUsuario])
+
+  // Derivar calidad predominante para activar columnas de códigos
+  const calidadPanel = useMemo(() => {
+    if (!filas.length) return null
+    if (filas.some(r => r.calidad === 'desvio_grave')) return 'desvio_grave'
+    if (filas.some(r => r.calidad === 'desvio_leve'))  return 'desvio_leve'
+    return 'correcto'
+  }, [filas])
 
   return (
     <li style={{ fontSize:'0.82rem', color:'var(--text2)', borderLeft:'2px solid var(--border2)',
@@ -304,14 +312,14 @@ function AccionItem({ accion, auditadosActivos, porUsuario, fuente }) {
           {filas.length > 0 ? (
             <TablaCasosInline
               rows={filas}
-              titulo={`Detalle — ${filas.length} registros`}
+              titulo={`Detalle \u2014 ${filas.length} registros`}
               onClose={() => setOpen(false)}
               fuente={fuente}
-              calidad={null}
+              calidad={calidadPanel}
             />
           ) : (
             <div style={{ fontSize:'0.78rem', color:'var(--text3)', fontStyle:'italic', padding:'0.25rem 0' }}>
-              No se pudo determinar un conjunto de casos específico para esta acción. Revisá el tab correspondiente.
+              No se pudo determinar un conjunto de casos espec\u00edfico para esta acci\u00f3n. Revis\u00e1 el tab correspondiente.
             </div>
           )}
         </div>
