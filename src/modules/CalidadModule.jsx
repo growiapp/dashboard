@@ -264,38 +264,22 @@ function DistribCard({ cat, val, total, isSelected, onToggle, combinado }) {
 }
 
 // ── Acciones sugeridas con detalle expandible ─────────────────────────────────
-function AccionItem({ accion, auditadosActivos, porDominio, porUsuario, navigateTo }) {
+function AccionItem({ accion, auditadosActivos, porUsuario, fuente }) {
   const [open, setOpen] = useState(false)
 
-  // Determinar qué datos mostrar al expandir
   const filas = useMemo(() => {
     if (!open) return []
-    // Si la acción menciona un dominio concreto, filtrar por ese dominio
-    const matchDominio = accion.match(/["""]([^"""]+)["""]\s*(?:tiene|—)/)
+    const matchDominio = accion.match(/[“”""]([^“”""]+)[“”""]\s*(?:tiene|—)/)
     if (matchDominio) {
       const dom = matchDominio[1]
       return auditadosActivos.filter(r => r.dominio === dom)
     }
-    // Si menciona colaboradores con efectividad baja
     if (accion.includes('colaborador')) {
-      const bajos = (porUsuario || []).filter(u => u.efectividadSug < 0.8 && u.totalSugs >= 5)
-        .map(u => u.usuario)
+      const bajos = (porUsuario || []).filter(u => u.efectividadSug < 0.8 && u.totalSugs >= 5).map(u => u.usuario)
       return auditadosActivos.filter(r => bajos.includes(r.usuario))
     }
     return []
   }, [open, accion, auditadosActivos, porUsuario])
-
-  const csvRows = filas.map(r => ({
-    id_caso: r.idCaso || '—',
-    sugerencia_id: r.sugerenciaId || '—',
-    usuario: r.usuario || '—',
-    auditor: r.auditor || '—',
-    dominio: r.dominio || '—',
-    calidad: r.calidad || '—',
-    semana: r.week || '—',
-  }))
-
-  const tieneDetalle = filas.length > 0 || !open
 
   return (
     <li style={{ fontSize:'0.82rem', color:'var(--text2)', borderLeft:'2px solid var(--border2)',
@@ -312,42 +296,21 @@ function AccionItem({ accion, auditadosActivos, porDominio, porUsuario, navigate
             border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', cursor:'pointer',
             whiteSpace:'nowrap',
           }}>
-          {open ? '▲ Cerrar' : 'Ver casos'}
+          {open ? '\u25b2 Cerrar' : 'Ver casos'}
         </button>
       </div>
       {open && (
         <div style={{ padding:'0 0.75rem 0.75rem' }}>
           {filas.length > 0 ? (
-            <>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.5rem' }}>
-                <span style={{ fontSize:'0.75rem', color:'var(--text3)' }}>{filas.length} casos auditados en el período</span>
-                <button onClick={() => exportCSV(csvRows, 'accion_detalle.csv')}
-                  style={{ fontSize:'0.72rem', padding:'0.2rem 0.6rem', background:'var(--bg3)', border:'1px solid var(--border)',
-                    borderRadius:'var(--radius-sm)', color:'var(--text2)', cursor:'pointer' }}>
-                  ⬇ Exportar CSV
-                </button>
-              </div>
-              <div className="table-wrap" style={{ maxHeight:300, overflowY:'auto' }}>
-                <table>
-                  <thead>
-                    <tr><th>ID Caso</th><th>Usuario</th><th>Dominio</th><th>Calidad</th><th>Sem.</th></tr>
-                  </thead>
-                  <tbody>
-                    {filas.map((r, i) => (
-                      <tr key={i}>
-                        <td style={{ fontFamily:'monospace', fontSize:'0.75rem' }}>{r.idCaso || '—'}</td>
-                        <td>{r.usuario || '—'}</td>
-                        <td style={{ color:'var(--text3)' }}>{r.dominio || '—'}</td>
-                        <td><span style={{ color:CALIDAD_COLORS[r.calidad], fontWeight:600 }}>{CALIDAD_LABELS[r.calidad] || r.calidad}</span></td>
-                        <td style={{ color:'var(--text3)' }}>{r.week ? `S${r.week}` : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+            <TablaCasosInline
+              rows={filas}
+              titulo={`Detalle — ${filas.length} registros`}
+              onClose={() => setOpen(false)}
+              fuente={fuente}
+              calidad={null}
+            />
           ) : (
-            <div style={{ fontSize:'0.78rem', color:'var(--text3)', fontStyle:'italic' }}>
+            <div style={{ fontSize:'0.78rem', color:'var(--text3)', fontStyle:'italic', padding:'0.25rem 0' }}>
               No se pudo determinar un conjunto de casos específico para esta acción. Revisá el tab correspondiente.
             </div>
           )}
@@ -356,7 +319,6 @@ function AccionItem({ accion, auditadosActivos, porDominio, porUsuario, navigate
     </li>
   )
 }
-
 // ── Componentes de fuente ──────────────────────────────────────────────────────
 function FuenteStatus({ label, available, active, count }) {
   const color = available ? (label === 'SdC' ? 'var(--green)' : 'var(--accent2)') : 'var(--border2)'
@@ -463,7 +425,12 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
   const distribFilas = useMemo(() => {
     if (!distribSelected) return []
     if (distribSelected.grupo === 'caso') {
-      return (casosData || []).filter(c => c.calidad === distribSelected.cat)
+      // Obtener los idCaso que tienen esa calidad de caso
+      const casosConCalidad = new Set(
+        (casosData || []).filter(c => c.calidad === distribSelected.cat).map(c => c.idCaso)
+      )
+      // Devolver todas las sugerencias de esos casos (con todos sus campos)
+      return auditadosActivos.filter(r => casosConCalidad.has(r.idCaso))
     }
     return auditadosActivos.filter(r => r.calidad === distribSelected.cat)
   }, [distribSelected, auditadosActivos, casosData])
@@ -847,8 +814,8 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
               key={i}
               accion={a}
               auditadosActivos={auditadosActivos}
-              porDominio={porDominio}
               porUsuario={porUsuario}
+              fuente={fuente}
             />
           ))}
         </ul>
