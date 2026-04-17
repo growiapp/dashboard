@@ -91,38 +91,26 @@ function TablaCasosInline({ rows, titulo, onClose }) {
 }
 
 // ── Cards de distribución clicables ──────────────────────────────────────────
-function DistribCard({ cat, val, total, auditadosActivos, esPorCaso, casosData }) {
-  const [open, setOpen] = useState(false)
-
-  const filas = useMemo(() => {
-    if (!open) return []
-    if (esPorCaso) {
-      return (casosData || []).filter(c => c.calidad === cat)
-    }
-    return auditadosActivos.filter(r => r.calidad === cat)
-  }, [open, cat, auditadosActivos, esPorCaso, casosData])
-
+function DistribCard({ cat, val, total, isSelected, onToggle }) {
   return (
-    <div style={{ background:'var(--bg3)', border:`1px solid ${CALIDAD_COLORS[cat]}40`,
-      borderLeft:`3px solid ${CALIDAD_COLORS[cat]}`, borderRadius:'var(--radius-sm)',
-      padding:'0.5rem 0.85rem', minWidth:130, cursor:'pointer', transition:'box-shadow 0.15s',
-      boxShadow: open ? `0 0 0 2px ${CALIDAD_COLORS[cat]}60` : 'none',
-    }}
-      onClick={() => setOpen(o => !o)}
+    <div
+      onClick={onToggle}
+      style={{
+        background:'var(--bg3)',
+        border:`1px solid ${isSelected ? CALIDAD_COLORS[cat] : CALIDAD_COLORS[cat]+'40'}`,
+        borderLeft:`3px solid ${CALIDAD_COLORS[cat]}`,
+        borderRadius:'var(--radius-sm)',
+        padding:'0.5rem 0.85rem', minWidth:130, cursor:'pointer',
+        transition:'box-shadow 0.15s, border-color 0.15s',
+        boxShadow: isSelected ? `0 0 0 2px ${CALIDAD_COLORS[cat]}60` : 'none',
+      }}
     >
       <div style={{ fontSize:'0.7rem', color:'var(--text3)', marginBottom:'0.1rem' }}>{CALIDAD_LABELS[cat]}</div>
       <div style={{ fontSize:'1.2rem', fontWeight:700, color:CALIDAD_COLORS[cat] }}>{formatNumber(val)}</div>
       <div style={{ fontSize:'0.7rem', color:'var(--text3)' }}>{total>0?Math.round(val/total*100):0}%</div>
-      <div style={{ fontSize:'0.65rem', color: open ? CALIDAD_COLORS[cat] : 'var(--text3)', marginTop:3 }}>
-        {open ? '▲ Ocultar detalle' : '▼ Ver casos'}
+      <div style={{ fontSize:'0.65rem', color: isSelected ? CALIDAD_COLORS[cat] : 'var(--text3)', marginTop:3 }}>
+        {isSelected ? '▲ Ocultar' : '▼ Ver casos'}
       </div>
-      {open && (
-        <TablaCasosInline
-          rows={filas}
-          titulo={CALIDAD_LABELS[cat]}
-          onClose={e => { e.stopPropagation(); setOpen(false) }}
-        />
-      )}
     </div>
   )
 }
@@ -176,7 +164,7 @@ function AccionItem({ accion, auditadosActivos, porDominio, porUsuario, navigate
             border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', cursor:'pointer',
             whiteSpace:'nowrap',
           }}>
-          {open ? '▲ Cerrar' : 'Ir →'}
+          {open ? '▲ Cerrar' : 'Ver casos'}
         </button>
       </div>
       {open && (
@@ -285,6 +273,15 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
   const { calidadModel } = model
   const [fuente, setFuente] = useState('sdc')
   const [autoSwitched, setAutoSwitched] = useState(false)
+  // Estado compartido para el panel de detalle de distribución
+  // { grupo: 'sug'|'caso', cat: string } | null
+  const [distribSelected, setDistribSelected] = useState(null)
+
+  function toggleDistrib(grupo, cat) {
+    setDistribSelected(prev =>
+      prev?.grupo === grupo && prev?.cat === cat ? null : { grupo, cat }
+    )
+  }
 
   const hasSdc = (auditados?.length || 0) > 0
   const hasMao = (auditadosMao?.length || 0) > 0
@@ -313,6 +310,15 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
   const { sorted: errorSorted, sortKey: errSortKey, sortDir: errSortDir, onSort: errOnSort } = useTableSort(porError_ || [], porError_ || [])
   const { sorted: auditorSorted, sortKey: audSortKey, sortDir: audSortDir, onSort: audOnSort } = useTableSort(porAuditor_ || [], porAuditor_ || [])
   const { sorted: usuarioSorted, sortKey: usuSortKey, sortDir: usuSortDir, onSort: usuOnSort } = useTableSort(porUsuario || [], porUsuario || [])
+
+  // Filas para el panel de detalle compartido de distribución
+  const distribFilas = useMemo(() => {
+    if (!distribSelected) return []
+    if (distribSelected.grupo === 'caso') {
+      return (casosData || []).filter(c => c.calidad === distribSelected.cat)
+    }
+    return auditadosActivos.filter(r => r.calidad === distribSelected.cat)
+  }, [distribSelected, auditadosActivos, casosData])
 
   const acciones = useMemo(() => {
     const a = []
@@ -354,8 +360,8 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
     labelPrincipal:'Sugerencias correctas', labelGraves:'Errores graves',
     subGraves:(pct) => `${pct}% del total. Requieren acción inmediata.`,
     mostrarCasos:true, mostrarComposicion:true,
-    labelDistribucion:'Distribución — por sugerencia_id',
-    labelDistribucionCaso:'Distribución — por Caso (id_caso)',
+    labelDistribucion:'Distribución — por Sugerencia',
+    labelDistribucionCaso:'Distribución — por Caso',
     subDistribucion:'Muestra dónde se concentra el error. Por sugerencia_id (métrica principal).',
     subDistribucionCaso:'Misma lectura pero agrupando todas las sugerencias de un caso. Si el caso tiene al menos un desvío, se cuenta como desviado.',
     colHeader:'Sugs',
@@ -465,48 +471,60 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
         )}
       </div>
 
-      {/* ── Distribución por sugerencia_id — cards clicables ── */}
+      {/* ── Distribuciones: Sugerencia + Caso en misma fila, panel compartido ── */}
       <div className="card">
-        <div className="card-header">
-          <div className="card-title">{vocab.labelDistribucion}</div>
-          <div className="card-subtitle">{vocab.subDistribucion} · Hacé click en una card para ver los casos.</div>
-        </div>
-        <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap' }}>
-          {Object.entries(kpis.bySug||{}).filter(([,v])=>v>0).map(([cat,val])=>(
-            <DistribCard
-              key={cat}
-              cat={cat}
-              val={val}
-              total={kpis.totalSugs}
-              auditadosActivos={auditadosActivos}
-              esPorCaso={false}
-            />
-          ))}
-        </div>
-      </div>
+        <div style={{ display:'grid', gridTemplateColumns: vocab.mostrarCasos && kpis.byCaso ? '1fr 1fr' : '1fr', gap:'1.5rem' }}>
 
-      {/* ── Distribución por id_caso — cards clicables (solo SdC) ── */}
-      {vocab.mostrarCasos && kpis.byCaso && (
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title">{vocab.labelDistribucionCaso}</div>
-            <div className="card-subtitle">{vocab.subDistribucionCaso} · Hacé click en una card para ver los casos.</div>
+          {/* Bloque Sugerencia */}
+          <div>
+            <div className="card-title" style={{ marginBottom:'0.25rem' }}>{vocab.labelDistribucion}</div>
+            <div className="card-subtitle" style={{ marginBottom:'0.75rem' }}>{vocab.subDistribucion}</div>
+            <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap' }}>
+              {Object.entries(kpis.bySug||{}).filter(([,v])=>v>0).map(([cat,val])=>(
+                <DistribCard
+                  key={cat}
+                  cat={cat}
+                  val={val}
+                  total={kpis.totalSugs}
+                  isSelected={distribSelected?.grupo==='sug' && distribSelected?.cat===cat}
+                  onToggle={() => toggleDistrib('sug', cat)}
+                />
+              ))}
+            </div>
           </div>
-          <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap' }}>
-            {Object.entries(kpis.byCaso||{}).filter(([,v])=>v>0).map(([cat,val])=>(
-              <DistribCard
-                key={cat}
-                cat={cat}
-                val={val}
-                total={kpis.totalCasos}
-                auditadosActivos={auditadosActivos}
-                esPorCaso={true}
-                casosData={casosData}
-              />
-            ))}
-          </div>
+
+          {/* Bloque Caso (solo SdC) */}
+          {vocab.mostrarCasos && kpis.byCaso && (
+            <div style={{ borderLeft:'1px solid var(--border)', paddingLeft:'1.5rem' }}>
+              <div className="card-title" style={{ marginBottom:'0.25rem' }}>{vocab.labelDistribucionCaso}</div>
+              <div className="card-subtitle" style={{ marginBottom:'0.75rem' }}>{vocab.subDistribucionCaso}</div>
+              <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap' }}>
+                {Object.entries(kpis.byCaso||{}).filter(([,v])=>v>0).map(([cat,val])=>(
+                  <DistribCard
+                    key={cat}
+                    cat={cat}
+                    val={val}
+                    total={kpis.totalCasos}
+                    isSelected={distribSelected?.grupo==='caso' && distribSelected?.cat===cat}
+                    onToggle={() => toggleDistrib('caso', cat)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Panel de detalle — ancho completo, debajo de las dos columnas */}
+        {distribSelected && (
+          <div style={{ marginTop:'1rem', borderTop:'1px solid var(--border)', paddingTop:'0.75rem' }}>
+            <TablaCasosInline
+              rows={distribFilas}
+              titulo={`${CALIDAD_LABELS[distribSelected.cat]} — ${distribSelected.grupo === 'sug' ? vocab.labelDistribucion : vocab.labelDistribucionCaso}`}
+              onClose={() => setDistribSelected(null)}
+            />
+          </div>
+        )}
+      </div>
 
       {/* ── Concentración de errores ── */}
       {concentracion && (
@@ -669,7 +687,7 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
       <div className="card">
         <div className="card-header" style={{ marginBottom:'0.75rem' }}>
           <div className="card-title">Acciones sugeridas</div>
-          <span className="badge badge-slate" style={{ fontSize:'0.65rem' }}>Hacé click en "Ir →" para ver el detalle de casos.</span>
+          <span className="badge badge-slate" style={{ fontSize:'0.65rem' }}>Hacé click en "Ver casos" para ver el detalle.</span>
         </div>
         <ul style={{ listStyle:'none', display:'flex', flexDirection:'column', gap:'0.5rem' }}>
           {acciones.map((a,i)=>(
