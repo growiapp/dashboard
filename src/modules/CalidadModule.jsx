@@ -425,12 +425,35 @@ export function CalidadModule({ model, auditados, auditadosMao }) {
   const distribFilas = useMemo(() => {
     if (!distribSelected) return []
     if (distribSelected.grupo === 'caso') {
-      // Obtener los idCaso que tienen esa calidad de caso
-      const casosConCalidad = new Set(
-        (casosData || []).filter(c => c.calidad === distribSelected.cat).map(c => c.idCaso)
-      )
-      // Devolver todas las sugerencias de esos casos (con todos sus campos)
-      return auditadosActivos.filter(r => casosConCalidad.has(r.idCaso))
+      // Una fila por caso — filtrar casosData por calidad del caso
+      const casosFiltrados = (casosData || []).filter(c => c.calidad === distribSelected.cat)
+      // Enriquecer cada caso con datos resumidos de sus sugerencias
+      return casosFiltrados.map(c => {
+        const sugs = c.sugerencias || []
+        const sugIds = sugs.map(s => s.sugerenciaId).filter(Boolean).join(', ')
+        // Códigos: los de las sugerencias con desvío, o el primero si todas correctas
+        const sugsDesvio = sugs.filter(s => s.calidad !== 'correcto')
+        const sugRef = sugsDesvio.length > 0 ? sugsDesvio[0] : sugs[0]
+        return {
+          // Campos de caso
+          idCaso:          c.idCaso,
+          usuario:         c.usuario,
+          auditor:         c.auditor,
+          dominio:         c.dominio,
+          week:            c.week,
+          calidad:         c.calidad,
+          // Campos enriquecidos desde sugerencias
+          sugerenciaId:    sugIds || '—',
+          suggestionReason: sugRef?.suggestionReason || null,
+          accionCorrecta:  sugRef?.accionCorrecta   || null,
+          resolucion:      sugRef?.resolucion        || null,
+          // MAO
+          pdpId:    c.pdpId    || sugs[0]?.pdpId    || null,
+          pdpLink:  c.pdpLink  || sugs[0]?.pdpLink  || null,
+          itemId:   c.itemId   || sugs[0]?.itemId   || null,
+          itemLink: c.itemLink || sugs[0]?.itemLink  || null,
+        }
+      })
     }
     return auditadosActivos.filter(r => r.calidad === distribSelected.cat)
   }, [distribSelected, auditadosActivos, casosData])
